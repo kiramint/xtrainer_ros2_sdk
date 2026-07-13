@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--This does not replace URDF, and is not an extension of URDF.
+    This is a format for representing semantic information about the robot structure.
+    A URDF file must exist for this robot as well, where the joints and the links that are referenced are defined
+-->
+<robot name="x_trainer">
+    <!--GROUPS: Representation of a set of joints and links. This can be useful for specifying DOF to plan for, defining arms, end effectors, etc-->
+    <!--LINKS: When a link is specified, the parent joint of that link (if it exists) is automatically included-->
+    <!--JOINTS: When a joint is specified, the child link of that joint (which will always exist) is automatically included-->
+    <!--CHAINS: When a chain is specified, all the links along the chain (including endpoints) are included in the group. Additionally, all the joints that are parents to included links are also included. This means that joints along the chain and the parent joint of the base link are included in the group-->
+    <!--SUBGROUPS: Groups can also be formed by referencing to already defined group names-->
+    <group name="Arm1">
+        <chain base_link="base_link" tip_link="L1_6"/>
+    </group>
+    <group name="Arm2">
+        <chain base_link="base_link" tip_link="L2_6"/>
+    </group>
+    <group name="Gripper1">
+        <link name="L1_7"/>
+        <link name="L1_8"/>
+        <joint name="J1_7"/>
+        <joint name="J1_8"/>
+    </group>
+    <group name="Gripper2">
+        <link name="L2_7"/>
+        <link name="L2_8"/>
+        <joint name="J2_7"/>
+        <joint name="J2_8"/>
+    </group>
+    <!--GROUP STATES: Purpose: Define a named state for a particular group, in terms of joint values. This is useful to define states like 'folded arms'-->
+    <group_state name="Home1" group="Arm1">
+        <joint name="J1_1" value="0"/>
+        <joint name="J1_2" value="0"/>
+        <joint name="J1_3" value="0"/>
+        <joint name="J1_4" value="0"/>
+        <joint name="J1_5" value="0"/>
+        <joint name="J1_6" value="0"/>
+    </group_state>
+    <group_state name="Home2" group="Arm2">
+        <joint name="J2_1" value="0"/>
+        <joint name="J2_2" value="0"/>
+        <joint name="J2_3" value="0"/>
+        <joint name="J2_4" value="0"/>
+        <joint name="J2_5" value="0"/>
+        <joint name="J2_6" value="0"/>
+    </group_state>
+    <group_state name="Open1" group="Gripper1">
+        <joint name="J1_7" value="-0.04"/>
+        <joint name="J1_8" value="0.04"/>
+    </group_state>
+    <group_state name="Close1" group="Gripper1">
+        <joint name="J1_7" value="0"/>
+        <joint name="J1_8" value="0"/>
+    </group_state>
+    <group_state name="Open2" group="Gripper2">
+        <joint name="J2_7" value="-0.04"/>
+        <joint name="J2_8" value="0.04"/>
+    </group_state>
+    <group_state name="Close2" group="Gripper2">
+        <joint name="J2_7" value="0"/>
+        <joint name="J2_8" value="0"/>
+    </group_state>
+    <!--END EFFECTOR: Purpose: Represent information about an end effector.-->
+    <end_effector name="End1" parent_link="L1_gripper_tcp" group="Gripper1" parent_group="Arm1"/>
+    <end_effector name="End2" parent_link="L2_gripper_tcp" group="Gripper2" parent_group="Arm2"/>
+    <!--VIRTUAL JOINT: Purpose: this element defines a virtual joint between a robot link and an external frame of reference (considered fixed with respect to the robot)-->
+    <virtual_joint name="world_joint" type="fixed" parent_frame="World" child_link="base_link"/>
+    <!--PASSIVE JOINT: Purpose: this element is used to mark joints that are not actuated-->
+    <passive_joint name="J3_1"/>
+    <passive_joint name="J3_2"/>
+    <passive_joint name="J3_3"/>
+    <passive_joint name="J3_4"/>
+    <passive_joint name="J3_5"/>
+    <passive_joint name="J3_6"/>
+    <passive_joint name="J4_1"/>
+    <passive_joint name="J4_2"/>
+    <passive_joint name="J4_3"/>
+    <passive_joint name="J4_4"/>
+    <passive_joint name="J4_5"/>
+    <passive_joint name="J4_6"/>
+    <!--DISABLE COLLISIONS: By default it is assumed that any link of the robot could potentially come into collision with any other link in the robot. This tag disables collision checking between a specified pair of links. -->
+    <disable_collisions link1="L1_6" link2="L1_7" reason="Adjacent"/>
+    <disable_collisions link1="L1_6" link2="L1_8" reason="Adjacent"/>
+    <disable_collisions link1="L1_6" link2="L1_gripper_tcp" reason="Adjacent"/>
+    <disable_collisions link1="L1_7" link2="L1_gripper_tcp" reason="Adjacent"/>
+    <disable_collisions link1="L1_8" link2="L1_gripper_tcp" reason="Adjacent"/>
+    <disable_collisions link1="L1_6" link2="L2_6" reason="Adjacent"/>
+    <disable_collisions link1="L1_6" link2="L2_7" reason="Never"/>
+    <disable_collisions link1="L1_6" link2="L2_8" reason="Never"/>
+    <disable_collisions link1="L1_7" link2="L2_6" reason="Never"/>
+    <disable_collisions link1="L1_7" link2="L2_7" reason="Never"/>
+    <disable_collisions link1="L1_7" link2="L2_8" reason="Never"/>
+    <disable_collisions link1="L1_8" link2="L2_6" reason="Never"/>
+    <disable_collisions link1="L1_8" link2="L2_7" reason="Never"/>
+    <disable_collisions link1="L1_8" link2="L2_8" reason="Never"/>
+    <disable_collisions link1="L2_6" link2="L2_7" reason="Adjacent"/>
+    <disable_collisions link1="L2_6" link2="L2_8" reason="Adjacent"/>
+    <disable_collisions link1="L2_6" link2="L2_gripper_tcp" reason="Adjacent"/>
+    <disable_collisions link1="L2_7" link2="L2_gripper_tcp" reason="Adjacent"/>
+    <disable_collisions link1="L2_8" link2="L2_gripper_tcp" reason="Adjacent"/>
+</robot>

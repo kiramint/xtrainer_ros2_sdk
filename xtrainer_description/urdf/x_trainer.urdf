@@ -1,0 +1,824 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<robot name="x_trainer">
+    <joint name="J1_1" type="revolute">
+        <origin xyz="0. 0. 0.2234" rpy="3.1415927 0. 3.1415927"/>
+        <parent link="base_link"/>
+        <child link="L1_1"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
+    </joint>
+    <joint name="J1_2" type="revolute">
+        <origin xyz="0. 0. 0." rpy="1.5707927 0. -0.0000072"/>
+        <parent link="L1_1"/>
+        <child link="L1_2"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
+    </joint>
+    <joint name="J1_3" type="revolute">
+        <origin xyz="0. -0.28 0. " rpy="-3.1415927 0. -1.5707927"/>
+        <parent link="L1_2"/>
+        <child link="L1_3"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
+    </joint>
+    <joint name="J1_4" type="revolute">
+        <origin xyz="0. 0.225 -0.1175001" rpy="0.0000073 -0. 3.1415925"/>
+        <parent link="L1_3"/>
+        <child link="L1_4"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
+    </joint>
+    <joint name="J1_5" type="revolute">
+        <origin xyz="-0. -0.12 0. " rpy="-1.5577533 1.5707927 -3.1285534"/>
+        <parent link="L1_4"/>
+        <child link="L1_5"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
+    </joint>
+    <joint name="J1_6" type="revolute">
+        <origin xyz="0. 0.087743 0. " rpy="-1.5708 0. -0. "/>
+        <parent link="L1_5"/>
+        <child link="L1_6"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
+    </joint>
+    <joint name="J1_7" type="prismatic">
+        <origin xyz="-0.0625 -0.024005 0.11568 " rpy="1.5707927 -0.0000001 -1.5707927"/>
+        <parent link="L1_6"/>
+        <child link="L1_7"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="-0.04" upper="0." effort="340282346638528859811704183484516925440." velocity="340282346638528859811704183484516925440."/>
+    </joint>
+    <joint name="J1_8" type="prismatic">
+        <origin xyz="0.0625 -0.024005 0.11568 " rpy="-1.5708 -0. 1.5708"/>
+        <parent link="L1_6"/>
+        <child link="L1_8"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="0." upper="0.04" effort="340282346638528859811704183484516925440." velocity="340282346638528859811704183484516925440."/>
+    </joint>
+    <link name="L1_gripper_tcp">
+        <visual>
+            <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+            <geometry>
+                <sphere radius="0.005"/>
+            </geometry>
+            <material name="red">
+                <color rgba="1.0 0.0 0.0 1.0"/>
+            </material>
+        </visual>
+    </link>
+    <joint name="J1_gripper_tcp" type="fixed">
+        <origin xyz="0 0 0.14568" rpy="0. 0. 0."/>
+        <parent link="L1_6"/>
+        <child link="L1_gripper_tcp"/>
+    </joint>
+    <joint name="J2_1" type="revolute">
+        <origin xyz="1.06 0. 0.2234" rpy="0. 0. 0."/>
+        <parent link="base_link"/>
+        <child link="L2_1"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
+    </joint>
+    <joint name="J2_2" type="revolute">
+        <origin xyz="0. 0. 0." rpy="-1.5708 0. -3.1415854"/>
+        <parent link="L2_1"/>
+        <child link="L2_2"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
+    </joint>
+    <joint name="J2_3" type="revolute">
+        <origin xyz="0. -0.28 0. " rpy="0. 0. 0."/>
+        <parent link="L2_2"/>
+        <child link="L2_3"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
+    </joint>
+    <joint name="J2_4" type="revolute">
+        <origin xyz="0.225 -0. 0.1175" rpy="-3.1415854 0. -3.1415854"/>
+        <parent link="L2_3"/>
+        <child link="L2_4"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
+    </joint>
+    <joint name="J2_5" type="revolute">
+        <origin xyz="-0.12 -0. 0. " rpy="1.5707927 0. 1.5707927"/>
+        <parent link="L2_4"/>
+        <child link="L2_5"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
+    </joint>
+    <joint name="J2_6" type="revolute">
+        <origin xyz="0.087743 -0. -0. " rpy="1.5707928 0. 1.5707927"/>
+        <parent link="L2_5"/>
+        <child link="L2_6"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
+    </joint>
+    <joint name="J2_7" type="prismatic">
+        <origin xyz="0.0625 0.023995 0.11568 " rpy="1.5707927 0.0000001 1.5707928"/>
+        <parent link="L2_6"/>
+        <child link="L2_7"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="-0.04" upper="0." effort="340282346638528859811704183484516925440." velocity="340282346638528859811704183484516925440."/>
+    </joint>
+    <joint name="J2_8" type="prismatic">
+        <origin xyz="-0.0625 0.023995 0.11568 " rpy="-1.5708 0. -1.5707998"/>
+        <parent link="L2_6"/>
+        <child link="L2_8"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="0." upper="0.04" effort="340282346638528859811704183484516925440." velocity="340282346638528859811704183484516925440."/>
+    </joint>
+    <link name="L2_gripper_tcp">
+        <visual>
+            <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+            <geometry>
+                <sphere radius="0.005"/>
+            </geometry>
+            <material name="red">
+                <color rgba="1.0 0.0 0.0 1.0"/>
+            </material>
+        </visual>
+    </link>
+    <joint name="J2_gripper_tcp" type="fixed">
+        <origin xyz="0 0 0.14568" rpy="0. 0. 0."/>
+        <parent link="L2_6"/>
+        <child link="L2_gripper_tcp"/>
+    </joint>
+    <joint name="J3_1" type="revolute">
+        <origin xyz="0.2 -0.575 0.15855" rpy="0. 0. -3.1415854"/>
+        <parent link="base_link"/>
+        <child link="L3_1"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
+    </joint>
+    <joint name="J3_2" type="revolute">
+        <origin xyz="0. 0. 0." rpy="-1.5708 0. 0. "/>
+        <parent link="L3_1"/>
+        <child link="L3_2"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
+    </joint>
+    <joint name="J3_3" type="revolute">
+        <origin xyz="0.0005 -0.19575 0.0275 " rpy="-0.0000072 0. 0.0000072"/>
+        <parent link="L3_2"/>
+        <child link="L3_3"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
+    </joint>
+    <joint name="J3_4" type="revolute">
+        <origin xyz="-0.1537 0.0011225 0.002 " rpy="0.0000001 0. 3.1415854"/>
+        <parent link="L3_3"/>
+        <child link="L3_4"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
+    </joint>
+    <joint name="J3_5" type="revolute">
+        <origin xyz="-0.0019999 0.0000146 0.05345 " rpy="1.5708 0.0000001 1.5635 "/>
+        <parent link="L3_4"/>
+        <child link="L3_5"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
+    </joint>
+    <joint name="J3_6" type="revolute">
+        <origin xyz="-0. 0.031 0.08645" rpy="-1.570797 -1.5635 -0.0000031"/>
+        <parent link="L3_5"/>
+        <child link="L3_6"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
+    </joint>
+    <joint name="J4_1" type="revolute">
+        <origin xyz="0.86 -0.575 0.15855" rpy="0. 0. 0."/>
+        <parent link="base_link"/>
+        <child link="L4_1"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
+    </joint>
+    <joint name="J4_2" type="revolute">
+        <origin xyz="0. 0. 0." rpy="-1.5708 0. -3.1415854"/>
+        <parent link="L4_1"/>
+        <child link="L4_2"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
+    </joint>
+    <joint name="J4_3" type="revolute">
+        <origin xyz="0. -0.19575 0.0275 " rpy="-0.0000072 0. 0.0000072"/>
+        <parent link="L4_2"/>
+        <child link="L4_3"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
+    </joint>
+    <joint name="J4_4" type="revolute">
+        <origin xyz="0.15369 0.0018579 0.002 " rpy="0.0000001 0. 3.1415854"/>
+        <parent link="L4_3"/>
+        <child link="L4_4"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
+    </joint>
+    <joint name="J4_5" type="revolute">
+        <origin xyz="0.0019999 0.0000242 0.05375 " rpy="-1.5708 0. 1.5829"/>
+        <parent link="L4_4"/>
+        <child link="L4_5"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
+    </joint>
+    <joint name="J4_6" type="revolute">
+        <origin xyz="-0. -0.031 0.08645" rpy="-1.5708046 1.5586998 3.1415808"/>
+        <parent link="L4_5"/>
+        <child link="L4_6"/>
+        <axis xyz="0. 0. 1."/>
+        <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
+    </joint>
+    <joint name="root_joint" type="fixed">
+        <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+        <parent link="World"/>
+        <child link="base_link"/>
+    </joint>
+    <link name="World"/>
+    <link name="L1_1">
+        <inertial>
+            <origin xyz="-0.0000002 -0.021871 -0.0236238" rpy="0. 0. 0."/>
+            <mass value="0.8033816"/>
+            <inertia ixx="0.0016795" ixy="0.0000001" ixz="0.0000001" iyy="0.0014697" iyz="0.000442" izz="0.0010371"/>
+        </inertial>
+        <visual>
+            <origin xyz="0. 0. 0." rpy="3.1415927 0. 3.1415927"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_1_visuals_J1_1_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="0. 0. 0." rpy="3.1415927 0. 3.1415927"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_1_collisions_J1_1_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+    </link>
+    <link name="L1_2">
+        <inertial>
+            <origin xyz="-0.0000067 -0.1503275 0.0931452" rpy="0. 0. 0."/>
+            <mass value="1.5781556"/>
+            <inertia ixx="0.0216386" ixy="0.0000003" ixz="0.0000001" iyy="0.0015667" iyz="-0.0011524" izz="0.0217353"/>
+        </inertial>
+        <visual>
+            <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_2_visuals_J1_2_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_2_collisions_J1_2_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+    </link>
+    <link name="L1_3">
+        <inertial>
+            <origin xyz="-0.0000032 0.1181929 0.0113246" rpy="0. 0. 0."/>
+            <mass value="0.9994857"/>
+            <inertia ixx="0.0093946" ixy="-0.0000001" ixz="0.0000001" iyy="0.0007762" iyz="-0.000541" izz="0.0094133"/>
+        </inertial>
+        <visual>
+            <origin xyz="0. 0. -0." rpy="-3.1415925 -0. 3.1415925"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_3_visuals_J1_3_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="0. 0. -0." rpy="-3.1415925 -0. 3.1415925"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_3_collisions_J1_3_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+    </link>
+    <link name="L1_4">
+        <inertial>
+            <origin xyz="0.0000025 -0.0226616 0.0204572" rpy="0. 0. 0."/>
+            <mass value="0.44171"/>
+            <inertia ixx="0.0006412" ixy="-0." ixz="0." iyy="0.0004554" iyz="-0.0002133" izz="0.0004828"/>
+        </inertial>
+        <visual>
+            <origin xyz="-0. 0. 0." rpy="0. 0. 0."/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_4_visuals_J1_4_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="-0. 0. 0." rpy="0. 0. 0."/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_4_collisions_J1_4_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+    </link>
+    <link name="L1_5">
+        <inertial>
+            <origin xyz="-0.0000024 0.001546 -0.0076052" rpy="0. 0. 0."/>
+            <mass value="0.5852312"/>
+            <inertia ixx="0.0006693" ixy="0." ixz="0." iyy="0.0004067" iyz="-0.0001209" izz="0.0006449"/>
+        </inertial>
+        <visual>
+            <origin xyz="0. 0. 0." rpy="-0. 0. -0."/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_5_visuals_J1_5_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="0. 0. 0." rpy="-0. 0. -0."/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_5_collisions_J1_5_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+    </link>
+    <link name="L1_6">
+        <inertial>
+            <origin xyz="0.0000861 -0.0093445 0.0193771" rpy="0. 0. 0."/>
+            <mass value="0.3281383"/>
+            <inertia ixx="0.000135" ixy="-0.0000007" ixz="-0.0000002" iyy="0.000308" iyz="0.0000013" izz="0.0003639"/>
+        </inertial>
+        <visual>
+            <origin xyz="-0. 0. -0." rpy="-0. 0. 0."/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_6_visuals_J1_6_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="-0. 0. -0." rpy="-0. 0. 0."/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_6_collisions_J1_6_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <collision>
+            <origin xyz="-0. 0. -0." rpy="-0. 0. 0."/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_6_collisions_J1_6_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </collision>
+    </link>
+    <link name="L1_7">
+        <inertial>
+            <origin xyz="0.024 0.0041946 0.0134416" rpy="0. 0. 0."/>
+            <mass value="0.0552138"/>
+            <inertia ixx="0.0000224" ixy="0." ixz="0." iyy="0.0000118" iyz="-0.0000038" izz="0.000029"/>
+        </inertial>
+        <visual>
+            <origin xyz="-0. 0. -0." rpy="-3.1415927 0. -3.1415927"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_7_visuals_J1_7_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="-0. 0. -0." rpy="-3.1415927 0. -3.1415927"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_7_collisions_J1_7_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <collision>
+            <origin xyz="-0. 0. -0." rpy="-3.1415927 0. -3.1415927"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_7_collisions_J1_7_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </collision>
+    </link>
+    <link name="L1_8">
+        <inertial>
+            <origin xyz="0.024 -0.0041946 0.0134416" rpy="0. 0. 0."/>
+            <mass value="0.0552138"/>
+            <inertia ixx="0.0000224" ixy="0." ixz="-0." iyy="0.0000118" iyz="0.0000038" izz="0.000029"/>
+        </inertial>
+        <visual>
+            <origin xyz="-0. -0. -0." rpy="-0.0000001 0. -0. "/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_8_visuals_J1_8_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="-0. -0. -0." rpy="-0.0000001 0. -0. "/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_8_collisions_J1_8_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <collision>
+            <origin xyz="-0. -0. -0." rpy="-0.0000001 0. -0. "/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_8_collisions_J1_8_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </collision>
+    </link>
+    <link name="L2_1">
+        <inertial>
+            <origin xyz="-0.0000002 -0.021871 -0.0236238" rpy="0. 0. 0."/>
+            <mass value="0.8033816"/>
+            <inertia ixx="0.0016795" ixy="0.0000001" ixz="0.0000001" iyy="0.0014697" iyz="0.000442" izz="0.0010371"/>
+        </inertial>
+        <visual>
+            <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_1_visuals_J2_1_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_1_collisions_J2_1_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+    </link>
+    <link name="L2_2">
+        <inertial>
+            <origin xyz="-0.0000067 -0.1503275 0.0931452" rpy="0. 0. 0."/>
+            <mass value="1.5781558"/>
+            <inertia ixx="0.0216386" ixy="0.0000003" ixz="0.0000001" iyy="0.0015667" iyz="-0.0011524" izz="0.0217353"/>
+        </inertial>
+        <visual>
+            <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_2_visuals_J2_2_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_2_collisions_J2_2_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+    </link>
+    <link name="L2_3">
+        <inertial>
+            <origin xyz="0.1181929 -0.0000108 0.0113246" rpy="0. 0. 0."/>
+            <mass value="0.9994857"/>
+            <inertia ixx="0.0007762" ixy="0.0000001" ixz="-0.000541" iyy="0.0093946" iyz="-0.0000001" izz="0.0094133"/>
+        </inertial>
+        <visual>
+            <origin xyz="0. -0. 0." rpy="0. 0. 0."/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_3_visuals_J2_3_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="0. -0. 0." rpy="0. 0. 0."/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_3_collisions_J2_3_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+    </link>
+    <link name="L2_4">
+        <inertial>
+            <origin xyz="-0.0226616 -0.0000165 0.0204572" rpy="0. 0. 0."/>
+            <mass value="0.4417101"/>
+            <inertia ixx="0.0004554" ixy="0." ixz="-0.0002133" iyy="0.0006412" iyz="-0." izz="0.0004828"/>
+        </inertial>
+        <visual>
+            <origin xyz="0. -0. 0." rpy="0.0000001 0. 0. "/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_4_visuals_J2_4_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="0. -0. 0." rpy="0.0000001 0. 0. "/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_4_collisions_J2_4_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+    </link>
+    <link name="L2_5">
+        <inertial>
+            <origin xyz="-0.0015452 -0.0000024 -0.0076052" rpy="0. 0. 0."/>
+            <mass value="0.5852312"/>
+            <inertia ixx="0.0004067" ixy="-0." ixz="0.0001209" iyy="0.0006693" iyz="0." izz="0.0006449"/>
+        </inertial>
+        <visual>
+            <origin xyz="0. -0. -0." rpy="3.1415927 -0.0000001 3.1415925"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_5_visuals_J2_5_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="0. -0. -0." rpy="3.1415927 -0.0000001 3.1415925"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_5_collisions_J2_5_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+    </link>
+    <link name="L2_6">
+        <inertial>
+            <origin xyz="0.0000861 -0.0093445 0.0193771" rpy="0. 0. 0."/>
+            <mass value="0.3281383"/>
+            <inertia ixx="0.000135" ixy="-0.0000007" ixz="-0.0000002" iyy="0.000308" iyz="0.0000013" izz="0.0003639"/>
+        </inertial>
+        <visual>
+            <origin xyz="-0. 0. 0." rpy="-0.0000001 -0. 0.0000001"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_6_visuals_J2_6_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="-0. 0. 0." rpy="-0.0000001 -0. 0.0000001"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_6_collisions_J2_6_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <collision>
+            <origin xyz="-0. 0. 0." rpy="-0.0000001 -0. 0.0000001"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_6_collisions_J2_6_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </collision>
+    </link>
+    <link name="L2_7">
+        <inertial>
+            <origin xyz="0.024 0.0041946 0.0134416" rpy="0. 0. 0."/>
+            <mass value="0.0552138"/>
+            <inertia ixx="0.0000224" ixy="0." ixz="0." iyy="0.0000118" iyz="-0.0000038" izz="0.000029"/>
+        </inertial>
+        <visual>
+            <origin xyz="-0. -0. 0." rpy="-3.1415925 -0. 3.1415925"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_7_visuals_J2_7_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="-0. -0. 0." rpy="-3.1415925 -0. 3.1415925"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_7_collisions_J2_7_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <collision>
+            <origin xyz="-0. -0. 0." rpy="-3.1415925 -0. 3.1415925"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_7_collisions_J2_7_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </collision>
+    </link>
+    <link name="L2_8">
+        <inertial>
+            <origin xyz="0.024 -0.0041946 0.0134416" rpy="0. 0. 0."/>
+            <mass value="0.0552138"/>
+            <inertia ixx="0.0000224" ixy="0." ixz="-0." iyy="0.0000118" iyz="0.0000038" izz="0.000029"/>
+        </inertial>
+        <visual>
+            <origin xyz="-0. 0. -0." rpy="0.0000001 -0. 0. "/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_8_visuals_J2_8_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="-0. 0. -0." rpy="0.0000001 -0. 0. "/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_8_collisions_J2_8_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <collision>
+            <origin xyz="-0. 0. -0." rpy="0.0000001 -0. 0. "/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_8_collisions_J2_8_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </collision>
+    </link>
+    <link name="L3_1">
+        <inertial>
+            <origin xyz="0.0000471 -0.0000021 -0.0215645" rpy="0. 0. 0."/>
+            <mass value="0.1307703"/>
+            <inertia ixx="0.0000709" ixy="-0." ixz="0.0000001" iyy="0.0000648" iyz="0." izz="0.0001026"/>
+        </inertial>
+        <visual>
+            <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J3_1_visuals_J3_1_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J3_1_collisions_J3_1_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+    </link>
+    <link name="L3_2">
+        <inertial>
+            <origin xyz="0.0004269 -0.1394967 -0.0002747" rpy="0. 0. 0."/>
+            <mass value="0.0832278"/>
+            <inertia ixx="0.0003952" ixy="0.0000005" ixz="-0." iyy="0.0000162" iyz="-0.0000004" izz="0.0003947"/>
+        </inertial>
+        <visual>
+            <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J3_2_visuals_J3_2_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J3_2_collisions_J3_2_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+    </link>
+    <link name="L3_3">
+        <inertial>
+            <origin xyz="0.0908854 0.000635 0.0222023" rpy="0. 0. 0."/>
+            <mass value="0.0569985"/>
+            <inertia ixx="0.0000197" ixy="-0.0000011" ixz="0.0000171" iyy="0.0001754" iyz="0.0000002" izz="0.0001627"/>
+        </inertial>
+        <visual>
+            <origin xyz="-0. -0. 0." rpy="-3.1415925 0. 3.1415927"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J3_3_visuals_J3_3_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="-0. -0. 0." rpy="-3.1415925 0. 3.1415927"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J3_3_collisions_J3_3_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+    </link>
+    <link name="L3_4">
+        <inertial>
+            <origin xyz="-0.0152257 -0.0001153 -0.0262211" rpy="0. 0. 0."/>
+            <mass value="0.0346342"/>
+            <inertia ixx="0.0000286" ixy="-0." ixz="0.0000014" iyy="0.00003" iyz="0." izz="0.0000048"/>
+        </inertial>
+        <visual>
+            <origin xyz="0. 0. 0." rpy="-3.1415925 0. 3.1415927"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J3_4_visuals_J3_4_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="0. 0. 0." rpy="-3.1415925 0. 3.1415927"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J3_4_collisions_J3_4_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+    </link>
+    <link name="L3_5">
+        <inertial>
+            <origin xyz="0.0000023 0.0157724 -0.0598829" rpy="0. 0. 0."/>
+            <mass value="0.0356973"/>
+            <inertia ixx="0.0000196" ixy="-0." ixz="0." iyy="0.0000182" iyz="-0.0000005" izz="0.0000049"/>
+        </inertial>
+        <visual>
+            <origin xyz="-0. 0. -0." rpy="-3.1415927 -0. 3.1415925"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J3_5_visuals_J3_5_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="-0. 0. -0." rpy="-3.1415927 -0. 3.1415925"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J3_5_collisions_J3_5_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+    </link>
+    <link name="L3_6">
+        <inertial>
+            <origin xyz="0.0013946 0.0236118 -0.0353133" rpy="0. 0. 0."/>
+            <mass value="0.0650882"/>
+            <inertia ixx="0.0000798" ixy="-0.0000013" ixz="0.000001" iyy="0.0000557" iyz="0.0000242" izz="0.0000408"/>
+        </inertial>
+        <visual>
+            <origin xyz="0. 0. 0." rpy="-3.1415925 -0.0000001 3.1415927"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J3_6_visuals_J3_6_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="0. 0. 0." rpy="-3.1415925 -0.0000001 3.1415927"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J3_6_collisions_J3_6_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+    </link>
+    <link name="L4_1">
+        <inertial>
+            <origin xyz="0.0000471 -0.0000021 -0.0215645" rpy="0. 0. 0."/>
+            <mass value="0.1307703"/>
+            <inertia ixx="0.0000709" ixy="-0." ixz="0.0000001" iyy="0.0000648" iyz="0." izz="0.0001026"/>
+        </inertial>
+        <visual>
+            <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J4_1_visuals_J4_1_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J4_1_collisions_J4_1_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+    </link>
+    <link name="L4_2">
+        <inertial>
+            <origin xyz="-0.0000731 -0.1394967 -0.0002747" rpy="0. 0. 0."/>
+            <mass value="0.0832278"/>
+            <inertia ixx="0.0003952" ixy="0.0000005" ixz="-0." iyy="0.0000162" iyz="-0.0000004" izz="0.0003947"/>
+        </inertial>
+        <visual>
+            <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J4_2_visuals_J4_2_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J4_2_collisions_J4_2_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+    </link>
+    <link name="L4_3">
+        <inertial>
+            <origin xyz="-0.0908806 0.0011274 0.0222023" rpy="0. 0. 0."/>
+            <mass value="0.0569985"/>
+            <inertia ixx="0.0000197" ixy="0.0000019" ixz="-0.0000171" iyy="0.0001754" iyz="0.0000001" izz="0.0001627"/>
+        </inertial>
+        <visual>
+            <origin xyz="0. -0. 0." rpy="-3.1415925 0. 3.1415927"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J4_3_visuals_J4_3_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="0. -0. 0." rpy="-3.1415925 0. 3.1415927"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J4_3_collisions_J4_3_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+    </link>
+    <link name="L4_4">
+        <inertial>
+            <origin xyz="0.0152251 -0.0001799 -0.0265211" rpy="0. 0. 0."/>
+            <mass value="0.0346342"/>
+            <inertia ixx="0.0000286" ixy="0." ixz="-0.0000014" iyy="0.00003" iyz="0." izz="0.0000048"/>
+        </inertial>
+        <visual>
+            <origin xyz="-0. -0. 0." rpy="-3.1415925 0. 3.1415927"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J4_4_visuals_J4_4_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="-0. -0. 0." rpy="-3.1415925 0. 3.1415927"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J4_4_collisions_J4_4_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+    </link>
+    <link name="L4_5">
+        <inertial>
+            <origin xyz="-0.0000023 -0.0156384 -0.0598829" rpy="0. 0. 0."/>
+            <mass value="0.0356973"/>
+            <inertia ixx="0.0000196" ixy="-0." ixz="-0." iyy="0.0000182" iyz="0.0000005" izz="0.0000049"/>
+        </inertial>
+        <visual>
+            <origin xyz="-0. 0. 0." rpy="3.1415927 -0. -3.1415927"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J4_5_visuals_J4_5_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="-0. 0. 0." rpy="3.1415927 -0. -3.1415927"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J4_5_collisions_J4_5_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+    </link>
+    <link name="L4_6">
+        <inertial>
+            <origin xyz="-0.0001347 0.0236526 -0.0350133" rpy="0. 0. 0."/>
+            <mass value="0.0650882"/>
+            <inertia ixx="0.0000799" ixy="0.0000003" ixz="-0.0000006" iyy="0.0000556" iyz="0.0000242" izz="0.0000408"/>
+        </inertial>
+        <visual>
+            <origin xyz="0. 0. 0." rpy="-3.1415927 0. -3.1415925"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J4_6_visuals_J4_6_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="0. 0. 0." rpy="-3.1415927 0. -3.1415925"/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J4_6_collisions_J4_6_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+    </link>
+    <link name="base_link">
+        <inertial>
+            <origin xyz="0.5299937 -0.1864414 -0.009367 " rpy="0. 0. 0."/>
+            <mass value="16.7027969"/>
+            <inertia ixx="1.1683151" ixy="0.0000008" ixz="0.0000015" iyy="2.3969156" iyz="0.010606" izz="3.5540379"/>
+        </inertial>
+        <visual>
+            <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_base_link_visuals_base_link_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+            <geometry>
+                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_base_link_collisions_base_link_mesh.obj" scale="1. 1. 1."/>
+            </geometry>
+        </visual>
+    </link>
+</robot>

@@ -1,0 +1,19 @@
+# Default initial positions for x_trainer's ros2_control fake system
+
+initial_positions:
+  J1_1: 0
+  J1_2: 0
+  J1_3: 0
+  J1_4: 0
+  J1_5: 0
+  J1_6: 0
+  J1_7: 0
+  J1_8: 0
+  J2_1: 0
+  J2_2: 0
+  J2_3: 0
+  J2_4: 0
+  J2_5: 0
+  J2_6: 0
+  J2_7: 0
+  J2_8: 0
