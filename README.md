@@ -1,0 +1,6 @@
+我现在正在进行ROS2开发。
+
+1. xtrainer是一个双臂机器人，有三个realsense相机分别在头部，两个手上
+2. dobot_bringup_v4是单个机械臂的驱动包，xtrainer_bridge合并两个机械臂的joint_states并适配moveit
+3. xtrainer_control放置机械臂控制代码，包括启动与标定
+现在帮我看下xtrainer_control的start.launch.py配置是否正确，先忽略一些没有配置的地方

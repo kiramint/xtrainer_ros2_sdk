@@ -1,0 +1,40 @@
+{
+    "robot_number": 2,
+    "current_robot": 1,
+    "node_info": [
+        {
+            "_comment": "===== 左臂 (Arm1) =====",
+            "side": "left",
+            "namespace": "Arm1",
+            "ip_address": "192.168.5.1",
+            "robot_type": "nova2",
+            "trajectory_duration": 0.3,
+            "robot_node_name": "dobot_bringup_ros2",
+            "joint_names": [
+                "J1_1",
+                "J1_2",
+                "J1_3",
+                "J1_4",
+                "J1_5",
+                "J1_6"
+            ]
+        },
+        {
+            "_comment": "===== 右臂 (Arm2) =====",
+            "side": "right",
+            "namespace": "Arm2",
+            "ip_address": "192.168.5.2",
+            "robot_type": "nova2",
+            "trajectory_duration": 0.3,
+            "robot_node_name": "robot_node_name2",
+            "joint_names": [
+                "J2_1",
+                "J2_2",
+                "J2_3",
+                "J2_4",
+                "J2_5",
+                "J2_6"
+            ]
+        }
+    ]
+}

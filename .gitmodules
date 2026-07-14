@@ -1,0 +1,6 @@
+[submodule "realsense-ros"]
+	path = realsense-ros
+	url = ./realsense-ros
+[submodule "easy_handeye2"]
+	path = easy_handeye2
+	url = ./easy_handeye2
