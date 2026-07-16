@@ -12,21 +12,13 @@ cur_json_path = os.path.join(cur_config_path, 'param.json')
 with open(cur_json_path, 'r') as file:
     json_data = json.load(file)
 
-robot_number = json_data["robot_number"]
-current_robot = json_data['current_robot']
 node_info = json_data["node_info"]
 
-
-# ip_address = json_data["node_info"][current_robot -
-#                                     1]["ip_address"]    # robot IP
-# robot_type = json_data["node_info"][current_robot -
-#                                     1]["robot_type"]  # robot type
-trajectory_duration = json_data["node_info"][current_robot -
-                                             1]["trajectory_duration"]
-robot_node_name = json_data["node_info"][current_robot -
-                                         1]["robot_node_name"]
-joint_names = json_data["node_info"][current_robot -
-                                     1]["joint_names"]
+# 默认取第一个机械臂配置
+robot_index = 0
+trajectory_duration = node_info[robot_index]["trajectory_duration"]
+robot_node_name = node_info[robot_index]["robot_node_name"]
+joint_names = node_info[robot_index]["joint_names"]
 ip_address = os.getenv("IP_address")
               
 robot_type = os.getenv("DOBOT_TYPE")
@@ -37,7 +29,6 @@ dobot_ros2_params = [
     {"robot_type": robot_type},
     {"trajectory_duration": trajectory_duration},
     {"robot_node_name": robot_node_name},
-    {"robot_number": robot_number},
     {"joint_names": joint_names},
 ]
 

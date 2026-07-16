@@ -16,7 +16,6 @@ cur_json_path = os.path.join(cur_config_path, 'param.json')
 with open(cur_json_path, 'r') as file:
     json_data = json.load(file)
 
-robot_number = json_data["robot_number"]
 node_info = json_data["node_info"]
 
 # 左臂 (Arm1) 配置 — node_info[0]
@@ -65,7 +64,6 @@ def generate_launch_description():
             "robot_type": arm1_info["robot_type"],
             "trajectory_duration": arm1_info["trajectory_duration"],
             "robot_node_name": arm1_info["robot_node_name"],
-            "robot_number": 1,
             "joint_names": arm1_info["joint_names"],
             "JointStatePublishRate": 50.0,
         }],
@@ -83,7 +81,6 @@ def generate_launch_description():
             "robot_type": arm2_info["robot_type"],
             "trajectory_duration": arm2_info["trajectory_duration"],
             "robot_node_name": arm2_info["robot_node_name"],
-            "robot_number": 1,
             "joint_names": arm2_info["joint_names"],
             "JointStatePublishRate": 50.0,
         }],
@@ -106,3 +103,4 @@ def generate_launch_description():
     )
 
     return LaunchDescription([rsp_node, arm1_node, arm2_node, bridge_node])
+    #return LaunchDescription([arm1_node])

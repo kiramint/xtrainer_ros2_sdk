@@ -2,7 +2,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription
+from launch.actions import IncludeLaunchDescription, TimerAction
 from launch_ros.actions import Node
 
 
@@ -12,7 +12,7 @@ def generate_launch_description():
     # ================================================================
     xtrainer_driver = IncludeLaunchDescription(
         os.path.join(
-            get_package_share_directory("dobot_bringup_v4"),
+            get_package_share_directory("cr_robot_ros2"),
             "launch",
             "xtrainer.launch.py",
         )
@@ -60,7 +60,7 @@ def generate_launch_description():
         ),
         launch_arguments={
             # --- SN 绑定 ---
-            "serial_no": "",
+            "serial_no": "'412622270884'",
             # --- 相机命名与命名空间 ---
             "camera_name": "camera_top",
             "camera_namespace": "camera",
@@ -94,7 +94,7 @@ def generate_launch_description():
         ),
         launch_arguments={
             # --- SN 绑定 ---
-            "serial_no": "",
+            "serial_no": "'412622272023'",
             # --- 相机命名与命名空间 ---
             "camera_name": "camera_left",
             "camera_namespace": "camera",
@@ -128,7 +128,7 @@ def generate_launch_description():
         ),
         launch_arguments={
             # --- SN 绑定 ---
-            "serial_no": "",
+            "serial_no": "'412622270837'",
             # --- 相机命名与命名空间 ---
             "camera_name": "camera_right",
             "camera_namespace": "camera",
@@ -208,18 +208,37 @@ def generate_launch_description():
             ),
         )
 
-    
+
+    # ================================================================
+    # 使能机械臂 (延迟启动，等待驱动节点就绪)
+    # ================================================================
+    enable_arms = TimerAction(
+        period=3.0,  # 等待 3s 确保驱动节点 TCP 连接建立
+        actions=[
+            Node(
+                package="xtrainer_control",
+                executable="enable_arms",
+                name="enable_arms_startup",
+                output="screen",
+                parameters=[{
+                    "namespaces": ["Arm1", "Arm2"],
+                }],
+            ),
+        ],
+    )
+
     # ================================================================
     # LaunchDescription
     # ================================================================
 
-    ld.append([
+    ld.extend([
             xtrainer_driver,
-            gripper_1,
-            gripper_2,
+            # gripper_1,
+            # gripper_2,
             realsense_camera_top,
-            realsense_camera_left,
-            realsense_camera_right,
+            # realsense_camera_left,
+            # realsense_camera_right,
+            enable_arms,
         ])
 
     return LaunchDescription(

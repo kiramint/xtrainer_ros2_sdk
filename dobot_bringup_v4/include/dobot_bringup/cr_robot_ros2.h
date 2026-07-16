@@ -418,7 +418,6 @@ private:
     void pubFeedBackInfo();
 
 private:
-    std::string kRobotName;
     std::shared_ptr<CRCommanderRos2> commander_;
     std::thread threadPubFeedBackInfo;
 };

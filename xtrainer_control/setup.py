@@ -14,6 +14,9 @@ setup(
         ('share/' + package_name + '/launch', ['launch/calibrate_top.launch.py']),
         ('share/' + package_name + '/launch', ['launch/calibrate_left.launch.py']),
         ('share/' + package_name + '/launch', ['launch/calibrate_right.launch.py']),
+        ('share/' + package_name + '/launch', ['launch/enable.launch.py']),
+        ('share/' + package_name + '/launch', ['launch/disable.launch.py']),
+        ('share/' + package_name + '/launch', ['launch/enable_and_drag.launch.py']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -28,7 +31,9 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            
+            'enable_arms = xtrainer_control.enable_arms:main',
+            'disable_arms = xtrainer_control.disable_arms:main',
+            'enable_and_drag = xtrainer_control.enable_and_drag:main',
         ],
     },
 )

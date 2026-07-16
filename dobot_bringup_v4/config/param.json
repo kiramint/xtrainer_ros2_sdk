@@ -1,6 +1,4 @@
 {
-    "robot_number": 2,
-    "current_robot": 1,
     "node_info": [
         {
             "_comment": "===== 左臂 (Arm1) =====",
