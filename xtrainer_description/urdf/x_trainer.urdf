@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <robot name="x_trainer">
     <joint name="J1_1" type="revolute">
-        <origin xyz="0. 0. 0.2234" rpy="3.1415927 0. 3.1415927"/>
+        <origin xyz="0. 0. 0.2234" rpy="-3.1415927 -0.0 -1.5707963"/>
         <parent link="base_link"/>
         <child link="L1_1"/>
         <axis xyz="0. 0. 1."/>
@@ -15,7 +15,7 @@
         <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
     </joint>
     <joint name="J1_3" type="revolute">
-        <origin xyz="0. -0.28 0. " rpy="-3.1415927 0. -1.5707927"/>
+        <origin xyz="0. -0.28 0. " rpy="3.1415927 0.0 0.0"/>
         <parent link="L1_2"/>
         <child link="L1_3"/>
         <axis xyz="0. 0. 1."/>
@@ -29,14 +29,14 @@
         <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
     </joint>
     <joint name="J1_5" type="revolute">
-        <origin xyz="-0. -0.12 0. " rpy="-1.5577533 1.5707927 -3.1285534"/>
+        <origin xyz="-0. -0.12 0. " rpy="-1.5707963 -0.0 3.1415889"/>
         <parent link="L1_4"/>
         <child link="L1_5"/>
         <axis xyz="0. 0. 1."/>
         <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
     </joint>
     <joint name="J1_6" type="revolute">
-        <origin xyz="0. 0.087743 0. " rpy="-1.5708 0. -0. "/>
+        <origin xyz="0. 0.087743 0. " rpy="-1.5707963 -1.5707963 0.0"/>
         <parent link="L1_5"/>
         <child link="L1_6"/>
         <axis xyz="0. 0. 1."/>
@@ -73,7 +73,7 @@
         <child link="L1_gripper_tcp"/>
     </joint>
     <joint name="J2_1" type="revolute">
-        <origin xyz="1.06 0. 0.2234" rpy="0. 0. 0."/>
+        <origin xyz="1.06 0. 0.2234" rpy="0.0 -0.0 -1.5707963"/>
         <parent link="base_link"/>
         <child link="L2_1"/>
         <axis xyz="0. 0. 1."/>
@@ -87,7 +87,7 @@
         <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
     </joint>
     <joint name="J2_3" type="revolute">
-        <origin xyz="0. -0.28 0. " rpy="0. 0. 0."/>
+        <origin xyz="0. -0.28 0. " rpy="0.0 -0.0 -1.5707963"/>
         <parent link="L2_2"/>
         <child link="L2_3"/>
         <axis xyz="0. 0. 1."/>
@@ -101,14 +101,14 @@
         <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
     </joint>
     <joint name="J2_5" type="revolute">
-        <origin xyz="-0.12 -0. 0. " rpy="1.5707927 0. 1.5707927"/>
+        <origin xyz="-0.12 -0. 0. " rpy="0.0000036 1.5707963 0.0"/>
         <parent link="L2_4"/>
         <child link="L2_5"/>
         <axis xyz="0. 0. 1."/>
         <limit lower="-3.1399998" upper="3.1399998" effort="340282346638528859811704183484516925440." velocity="5939047335254987724700441203225657344."/>
     </joint>
     <joint name="J2_6" type="revolute">
-        <origin xyz="0.087743 -0. -0. " rpy="1.5707928 0. 1.5707927"/>
+        <origin xyz="0.087743 -0. -0. " rpy="3.1415890 -1.5707963 0.0"/>
         <parent link="L2_5"/>
         <child link="L2_6"/>
         <axis xyz="0. 0. 1."/>
