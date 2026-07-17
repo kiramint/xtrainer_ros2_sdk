@@ -86,21 +86,31 @@ def generate_launch_description():
         }],
     )
 
-    # 桥接节点 — 合并 joint_states + FollowJointTrajectory Action Server
-    bridge_node = launch_ros.actions.Node(
+    # joint_states 合并节点 (照官方 dobot_moveit/joint_states.py 事件驱动, 独立 node)
+    joint_states_node = launch_ros.actions.Node(
         package='xtrainer_bridge',
-        executable='xtrainer_bridge_node',
-        name='xtrainer_bridge',
+        executable='xtrainer_joint_states',
+        name='xtrainer_joint_states',
         output='screen',
         parameters=[{
             "arm1_joint_names": arm1_info["joint_names"],
             "arm2_joint_names": arm2_info["joint_names"],
-            "arm1_servoj_service": "/Arm1/dobot_bringup_ros2/srv/ServoJ",
-            "arm2_servoj_service": "/Arm2/dobot_bringup_ros2/srv/ServoJ",
             "arm1_joint_state_topic": "/Arm1/joint_states_robot",
             "arm2_joint_state_topic": "/Arm2/joint_states_robot",
         }],
     )
 
-    return LaunchDescription([rsp_node, arm1_node, arm2_node, bridge_node])
+    # controller 节点 (照官方 dobot_moveit/action_move_server.py, 独立 node)
+    controller_node = launch_ros.actions.Node(
+        package='xtrainer_bridge',
+        executable='xtrainer_controller',
+        name='xtrainer_controller',
+        output='screen',
+        parameters=[{
+            "arm1_servoj_service": "/Arm1/dobot_bringup_ros2/srv/ServoJ",
+            "arm2_servoj_service": "/Arm2/dobot_bringup_ros2/srv/ServoJ",
+        }],
+    )
+
+    return LaunchDescription([rsp_node, arm1_node, arm2_node, joint_states_node, controller_node])
     #return LaunchDescription([arm1_node])

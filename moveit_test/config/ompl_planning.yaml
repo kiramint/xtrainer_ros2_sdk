@@ -1,0 +1,22 @@
+# OMPL planning pipeline (覆盖 Jazzy 默认, 新增 Ruckig 平滑)
+# MoveItConfigsBuilder 优先读本文件, 找不到才用 moveit_configs_utils/default_configs/ompl_planning.yaml
+#
+# response_adapters 顺序即处理顺序:
+#   1. AddTimeOptimalParameterization (TOTG) — 时间最优时间参数化, bang-bang 加速度
+#   2. AddRuckigTrajectorySmoothing — jerk 有限 S 曲线平滑, 修复 TOTG 的加速度阶跃
+#   3. ValidateSolution — 校验
+#   4. DisplayMotionPath — RViz 显示
+
+planning_plugins:
+  - ompl_interface/OMPLPlanner
+# The order of the elements in the adapter corresponds to the order they are processed by the motion planning pipeline.
+request_adapters:
+  - default_planning_request_adapters/ResolveConstraintFrames
+  - default_planning_request_adapters/ValidateWorkspaceBounds
+  - default_planning_request_adapters/CheckStartStateBounds
+  - default_planning_request_adapters/CheckStartStateCollision
+response_adapters:
+  - default_planning_response_adapters/AddTimeOptimalParameterization
+  - default_planning_response_adapters/AddRuckigTrajectorySmoothing
+  - default_planning_response_adapters/ValidateSolution
+  - default_planning_response_adapters/DisplayMotionPath

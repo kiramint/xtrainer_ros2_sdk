@@ -242,8 +242,12 @@ void CRRobotRos2::init()
     kServiceRelMovLUser = this->create_service<dobot_msgs_v4::srv::RelMovLUser>(serviceRelMovLUser, std::bind(&CRRobotRos2::RelMovLUser, this, std::placeholders::_1, std::placeholders::_2));
     kServiceRelJointMovJ = this->create_service<dobot_msgs_v4::srv::RelJointMovJ>(serviceRelJointMovJ, std::bind(&CRRobotRos2::RelJointMovJ, this, std::placeholders::_1, std::placeholders::_2));
     kServiceGetCurrentCommandId = this->create_service<dobot_msgs_v4::srv::GetCurrentCommandId>(serviceGetCurrentCommandId, std::bind(&CRRobotRos2::GetCurrentCommandId, this, std::placeholders::_1, std::placeholders::_2));
-    kServiceServoJ = this->create_service<dobot_msgs_v4::srv::ServoJ>(serviceServoJ, std::bind(&CRRobotRos2::ServoJ, this, std::placeholders::_1, std::placeholders::_2));
-    kServiceServoP = this->create_service<dobot_msgs_v4::srv::ServoP>(serviceServoP, std::bind(&CRRobotRos2::ServoP, this, std::placeholders::_1, std::placeholders::_2));
+    // ServoJ/ServoP 是高频流式指令, 每次回调阻塞 TCP echo ~10-15ms。
+    // 放入独立 callback group, 配合 MultiThreadedExecutor,
+    // 避免阻塞 joint_states 发布定时器 (保持稳定 50Hz)。
+    servo_cb_group_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    kServiceServoJ = this->create_service<dobot_msgs_v4::srv::ServoJ>(serviceServoJ, std::bind(&CRRobotRos2::ServoJ, this, std::placeholders::_1, std::placeholders::_2), rmw_qos_profile_services_default, servo_cb_group_);
+    kServiceServoP = this->create_service<dobot_msgs_v4::srv::ServoP>(serviceServoP, std::bind(&CRRobotRos2::ServoP, this, std::placeholders::_1, std::placeholders::_2), rmw_qos_profile_services_default, servo_cb_group_);
 kServiceEnableFTSensor = this->create_service<dobot_msgs_v4::srv::EnableFTSensor>(serviceEnableFTSensor, std::bind(&CRRobotRos2::EnableFTSensor, this, std::placeholders::_1, std::placeholders::_2));
     kServiceSixForceHome = this->create_service<dobot_msgs_v4::srv::SixForceHome>(serviceSixForceHome, std::bind(&CRRobotRos2::SixForceHome, this, std::placeholders::_1, std::placeholders::_2));
     kServiceGetForce = this->create_service<dobot_msgs_v4::srv::GetForce>(serviceGetForce, std::bind(&CRRobotRos2::GetForce, this, std::placeholders::_1, std::placeholders::_2));

@@ -21,6 +21,8 @@ setup(
     entry_points={
         'console_scripts': [
             'xtrainer_bridge_node = xtrainer_bridge.xtrainer_bridge_node:main',
+            'xtrainer_joint_states = xtrainer_bridge.xtrainer_joint_states:main',
+            'xtrainer_controller = xtrainer_bridge.xtrainer_controller:main',
         ],
     },
 )

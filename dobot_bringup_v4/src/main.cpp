@@ -33,61 +33,61 @@ int main(int argc, char *argv[])
     dobot_msgs_v4::msg::ToolVectorActual tool_vector_actual_msg;
     rclcpp::Publisher<dobot_msgs_v4::msg::ToolVectorActual>::SharedPtr tool_vector_pub = robot->create_publisher<dobot_msgs_v4::msg::ToolVectorActual>("dobot_msgs_v4/msg/ToolVectorActual", 10);
 
-    std::string z = "/";
-    const char *robot_type = getenv("DOBOT_TYPE");
-    std::string a = robot_type == nullptr ? "cr5" : robot_type;
-    std::string b = "_robot/joint_controller/follow_joint_trajectory";
-    std::string ss = z + a + b;
-    //  for (uint32_t i = 0; i < 6; i++)
-    //  {
-    //    joint_state_msg.position.push_back(0.0);
-    //    joint_state_msg.name.push_back(std::string("joint") + std::to_string(i + 1));
-    //  }
-
     double rate_value = robot->declare_parameter<double>("JointStatePublishRate", 10.0);
 
     robot->init();
 
-    rclcpp::Rate rate(rate_value);
-    double position[6];
-    while (rclcpp::ok())
+    // 用 wall_timer 替代原来的 while+rate 循环发布
+    // timer 在节点默认 callback group 上, 与 ServoJ 的独立 group 分开
+    // 配合 MultiThreadedExecutor, ServoJ 阻塞 TCP 不会影响 joint_states 发布
+    double position[6] = {0};
+    rclcpp::TimerBase::SharedPtr pub_timer = robot->create_wall_timer(
+        std::chrono::milliseconds(static_cast<int64_t>(1000.0 / rate_value)),
+        [&]() {
+            if (robot->isConnected())
+            {
+                robot->getJointState(position);
+            }
+            else
+            {
+                memset(position, 0, sizeof(position));
+            }
+            joint_state_msg.header.stamp = robot->get_clock()->now();
+            joint_state_msg.header.frame_id = "dummy_link";
+            for (uint32_t i = 0; i < 6; i++)
+            {
+                joint_state_msg.position[i] = position[i];
+            }
+            joint_state_pub->publish(joint_state_msg);
+
+            double val[6];
+            if (robot->isConnected())
+            {
+                robot->getToolVectorActual(val);
+                tool_vector_actual_msg.x = val[0];
+                tool_vector_actual_msg.y = val[1];
+                tool_vector_actual_msg.z = val[2];
+                tool_vector_actual_msg.rx = val[3];
+                tool_vector_actual_msg.ry = val[4];
+                tool_vector_actual_msg.rz = val[5];
+                tool_vector_pub->publish(tool_vector_actual_msg);
+            }
+
+            robot_status_msg.is_enable = robot->isEnable();
+            robot_status_msg.is_connected = robot->isConnected();
+            robot_status_pub->publish(robot_status_msg);
+        });
+
+    // MultiThreadedExecutor: ServoJ service (独立 group) 和 timer (默认 group)
+    // 可在不同线程并发, ServoJ TCP 阻塞不再卡住 joint_states 发布
+    rclcpp::executors::MultiThreadedExecutor executor;
+    executor.add_node(robot);
+    try
     {
-        // 获取关节状态并发布消息
-        if (robot->isConnected())
-        {
-            robot->getJointState(position);
-        }
-        else
-        {
-            memset(position, 0, sizeof(position));
-        }
-        joint_state_msg.header.stamp = robot->get_clock()->now();
-        joint_state_msg.header.frame_id = "dummy_link";
-        for (uint32_t i = 0; i < 6; i++)
-        {
-            joint_state_msg.position[i] = position[i];
-        }
-        joint_state_pub->publish(joint_state_msg);
-
-        double val[6];
-        if (robot->isConnected())
-        {
-            robot->getToolVectorActual(val);
-            tool_vector_actual_msg.x = val[0];
-            tool_vector_actual_msg.y = val[1];
-            tool_vector_actual_msg.z = val[2];
-            tool_vector_actual_msg.rx = val[3];
-            tool_vector_actual_msg.ry = val[4];
-            tool_vector_actual_msg.rz = val[5];
-            tool_vector_pub->publish(tool_vector_actual_msg);
-        }
-
-        // publish robot status
-        robot_status_msg.is_enable = robot->isEnable();
-        robot_status_msg.is_connected = robot->isConnected();
-        robot_status_pub->publish(robot_status_msg);
-        rclcpp::spin_some(robot);
-        rate.sleep();
+        executor.spin();
+    }
+    catch (...)
+    {
     }
 
     // 关闭 ROS 2 环境

@@ -381,6 +381,11 @@ private:
     std::shared_ptr<rclcpp::Service<dobot_msgs_v4::srv::GetCurrentCommandId>> kServiceGetCurrentCommandId;
     std::shared_ptr<rclcpp::Service<dobot_msgs_v4::srv::ServoJ>> kServiceServoJ;
     std::shared_ptr<rclcpp::Service<dobot_msgs_v4::srv::ServoP>> kServiceServoP;
+
+    // 独立 callback group: ServoJ/ServoP 是高频流式指令, 阻塞 TCP echo ~10-15ms,
+    // 必须与 joint_states 发布定时器分在不同 group, 否则 MultiThreadedExecutor
+    // 下会抢占发布线程导致 /joint_states_robot 频率不稳。
+    rclcpp::CallbackGroup::SharedPtr servo_cb_group_;
     std::shared_ptr<rclcpp::Service<dobot_msgs_v4::srv::EnableFTSensor>> kServiceEnableFTSensor;
     std::shared_ptr<rclcpp::Service<dobot_msgs_v4::srv::SixForceHome>> kServiceSixForceHome;
     std::shared_ptr<rclcpp::Service<dobot_msgs_v4::srv::GetForce>> kServiceGetForce;

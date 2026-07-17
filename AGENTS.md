@@ -21,7 +21,7 @@ XTrainer 是一个双臂机器人系统，使用 ROS2 进行控制。
 | 包名 | 用途 |
 |------|------|
 | `dobot_bringup_v4` | 单个机械臂驱动节点 (`cr_robot_ros2_node`) |
-| `xtrainer_bridge` | 合并双臂 joint_states → `/joint_states`，提供 FollowJointTrajectory Action |
+| `xtrainer_bridge` | 双臂桥接: `xtrainer_joint_states` (合并 joint_states) + `xtrainer_controller` (FollowJointTrajectory→ServoJ) |
 | `xtrainer_control` | 顶层启动、标定、机械臂状态控制 |
 | `xtrainer_description` | URDF 模型 (x_trainer.urdf) |
 | `xtrainer_gripper` | 串口夹爪控制节点 |
@@ -137,12 +137,15 @@ MoveIt (move_group)
   └─ /Arm1_controller/follow_joint_trajectory (FollowJointTrajectory Action)
   └─ /Arm2_controller/follow_joint_trajectory (FollowJointTrajectory Action)
         ↓
-xtrainer_bridge (双臂 FollowJointTrajectory Action Server)
-  └─ 逐点调用 ServoJ 服务 (rad→deg 转换, t=相邻dt)
+xtrainer_controller (双臂 FollowJointTrajectory Action Server, 独立 node)
+  └─ 逐点调用 ServoJ 服务 (rad→deg 转换, t=相邻dt, fire-and-forget)
         ↓
 dobot_bringup_v4 (cr_robot_ros2_node, 每臂一个, /Arm1 /Arm2 namespace)
   └─ TCP Dashboard (端口 29999) 发送 ServoJ(j1,...,j6,t=...) 命令
   └─ TCP RealTime (端口 30004) 接收关节状态反馈
+
+dobot_bringup_v4 ──► /ArmX/joint_states_robot ──► xtrainer_joint_states (独立 node, 事件驱动合并)
+                                                    └─► /joint_states (12 关节)
 ```
 
 ### MoveIt 包 (`moveit_test`)
@@ -152,6 +155,7 @@ dobot_bringup_v4 (cr_robot_ros2_node, 每臂一个, /Arm1 /Arm2 namespace)
 | `config/moveit_controllers.yaml` | MoveIt controller manager 配置, 指向 `/ArmX_controller/follow_joint_trajectory` |
 | `config/joint_limits.yaml` | 关节速度/加速度限制 (控制 TOTG 时间参数化) |
 | `config/pilz_cartesian_limits.yaml` | Pilz 规划器笛卡尔限制 |
+| `config/ompl_planning.yaml` | OMPL pipeline + Ruckig 平滑 (覆盖 Jazzy 默认) |
 | `config/x_trainer.urdf.xacro` | URDF 入口 (不含 ros2_control, 避免 action server 冲突) |
 | `config/x_trainer.srdf` | 规划组定义: Arm1 (base_link→L1_6), Arm2 (base_link→L2_6) |
 | `launch/demo.launch.py` | MoveIt demo 启动 (自定义, 不启动 ros2_control_node) |
@@ -161,13 +165,24 @@ dobot_bringup_v4 (cr_robot_ros2_node, 每臂一个, /Arm1 /Arm2 namespace)
 #### joint_limits.yaml (TOTG 时间参数化)
 
 ```yaml
-default_velocity_scaling_factor: 0.1
+default_velocity_scaling_factor: 0.3
 default_acceleration_scaling_factor: 0.1
 # 每个关节 (J1_1~J1_6, J2_1~J2_6):
 has_velocity_limits: true
-max_velocity: 3.14          # rad/s, ×0.1 scaling = 0.314 rad/s ≈ 18°/s
+max_velocity: 3.14          # rad/s, ×0.3 scaling = 0.94 rad/s ≈ 54°/s
 has_acceleration_limits: true
-max_acceleration: 3.14      # rad/s², 限加速度让 TOTG 生成梯形(非bang-bang)
+max_acceleration: 3.14      # rad/s², ×0.1 scaling = 0.314 (Jazzy TOTG 强制要求)
+```
+
+#### ompl_planning.yaml (Ruckig 平滑)
+
+```yaml
+# 在 TOTG 之后加 Ruckig, 把 bang-bang 加速度转成 jerk 有限 S 曲线
+response_adapters:
+  - default_planning_response_adapters/AddTimeOptimalParameterization
+  - default_planning_response_adapters/AddRuckigTrajectorySmoothing   # ← 关键
+  - default_planning_response_adapters/ValidateSolution
+  - default_planning_response_adapters/DisplayMotionPath
 ```
 
 #### pilz_cartesian_limits.yaml (照官方 Nova2)
@@ -188,15 +203,31 @@ max_rot_vel: 0.785    # rad/s
 
 URDF effort/velocity 全部设为 `0` (=不限制), 清理 SolidWorks 导出垃圾值。关节级限速由 `joint_limits.yaml` 管理。
 
-### xtrainer_bridge 节点参数
+### xtrainer_bridge 包: 两个独立 node
+
+拆分原因: 单 node 合并 joint_states + 轨迹执行时, ServoJ 的 call_async 在同 executor 内竞争线程, 导致 /joint_states 频率不稳。拆成两个独立进程彻底隔离。
+
+#### `xtrainer_joint_states` (对照官方 dobot_moveit/joint_states.py)
+
+事件驱动合并双臂 joint_states, 无 timer, rclpy.spin 单线程。
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `joint_state_publish_rate` | 50.0 | /joint_states 合并发布频率, 与 driver 同频 |
-| `servoj_angle_unit` | 'rad' | 'rad'=弧度转度发送, 'deg'=已是度 |
-| `servoj_initial_t` | 0.05 | 首 ServoJ 命令的 t 参数 (秒) |
-| `servoj_t_min` | 0.004 | t 下限 (文档要求 ≥0.004) |
-| `control_frequency` | -1 (已废弃) | 不再驱动插补, 仅向后兼容 |
+| `arm1_joint_names` | ['J1_1'..'J1_6'] | 左臂关节名 |
+| `arm2_joint_names` | ['J2_1'..'J2_6'] | 右臂关节名 |
+| `arm1_joint_state_topic` | /Arm1/joint_states_robot | 左臂状态话题 |
+| `arm2_joint_state_topic` | /Arm2/joint_states_robot | 右臂状态话题 |
+
+#### `xtrainer_controller` (对照官方 dobot_moveit/action_move_server.py)
+
+双臂 FollowJointTrajectory→ServoJ, MultiThreadedExecutor + ReentrantCallbackGroup。
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `arm1_servoj_service` | /Arm1/dobot_bringup_ros2/srv/ServoJ | 左臂 ServoJ 服务 |
+| `arm2_servoj_service` | /Arm2/dobot_bringup_ros2/srv/ServoJ | 右臂 ServoJ 服务 |
+
+> **注意**: 旧的 `xtrainer_bridge_node` 仍保留但不再使用, 被 `xtrainer_joint_states` + `xtrainer_controller` 替代。
 
 ### MoveIt 启动方式
 
@@ -442,6 +473,27 @@ ros2 run xtrainer_control disable_arms
 - [x] `pilz_cartesian_limits.yaml`: 照官方降低 (trans_vel 1.0→0.5, trans_acc 2.25→1.0, trans_dec -5.0→-2.0, rot_vel 1.57→0.785)
 - [x] `x_trainer.urdf`: 角度限制照官方逐关节 (J1/J4/J5/J6=±6.28, J2=±3.14, J3=±2.79), effort/velocity 全清零
 
+### `moveit_test` — 新增 Ruckig 平滑 + 调整 scaling
+
+- [x] **根因**: TOTG 生成 bang-bang 加速度 (瞬时 ±max), 加加速度(jerk)无穷大 → 控制器内部插补器追不上 → 卡顿
+- [x] 新建 `config/ompl_planning.yaml`: 在 TOTG 后加 `AddRuckigTrajectorySmoothing`, 把 bang-bang 转 jerk 有限 S 曲线
+- [x] `joint_limits.yaml` scaling 调整: velocity 0.1→0.3 (提速), acceleration 保持 0.1 (低加速度更平滑)
+
+### `cr_robot_ros2` (driver) — MultiThreadedExecutor + 回调组隔离
+
+- [x] **根因**: `main.cpp` 用 `while`+`spin_some` 单线程循环, ServoJ 回调阻塞 TCP echo ~10-15ms 卡住 joint_states 发布 → /joint_states_robot 不稳 → bridge /joint_states 跟着不稳
+- [x] `main.cpp`: `while`+`spin_some` → `MultiThreadedExecutor` + `wall_timer` 发布 joint_states
+- [x] `cr_robot_ros2.h`: 新增 `servo_cb_group_` 成员
+- [x] `cr_robot_ros2.cpp`: ServoJ/ServoP 服务放入独立 `MutuallyExclusive` callback group, 与 timer 发布隔离
+
+### `xtrainer_bridge` — 拆分为两个独立 node (终极修复)
+
+- [x] **根因**: 单 `xtrainer_bridge_node` 内 joint_states timer 与轨迹执行的 ServoJ call_async 在同一 executor 内竞争线程, 即使 MultiThreadedExecutor(8线程) + callback group 隔离仍不稳
+- [x] 新增 `xtrainer_joint_states.py` — 事件驱动合并双臂 joint_states (照官方 joint_states.py)
+- [x] 新增 `xtrainer_controller.py` — FollowJointTrajectory→ServoJ (照官方 action_move_server.py, async def execute_callback)
+- [x] `setup.py`: 新增两个入口点 `xtrainer_joint_states` 和 `xtrainer_controller`
+- [x] `dobot_bringup_v4/launch/xtrainer.launch.py`: 单 bridge_node → 两个独立 node
+
 ---
 
 ## MoveIt 调优经验教训
@@ -453,6 +505,7 @@ ros2 run xtrainer_control disable_arms
 3. **能动但卡顿**: 检查轨迹执行策略 (是否本地插补), 检查 t 参数 (是否固定值 vs 相邻dt), 检查 driver TCP 阻塞
 4. **连续运动中刹车**: 检查 t 是否远大于发送间隔 (末端减速), 检查 joint_limits (TOTG bang-bang)
 5. **MoveIt execute 失败/timeout**: 检查是否有 ros2_control 与 bridge 的 action server 冲突
+6. **/joint_states 频率不稳**: 检查是否单 node 内 joint_states 与 ServoJ 竞争线程 → 拆成独立 node
 
 ### 关键陷阱
 
@@ -463,8 +516,11 @@ ros2 run xtrainer_control disable_arms
 | 本地线性插补 | waypoint 边界速度阶跃 → 卡顿 | 直发 waypoint, 依赖控制器内部插补 |
 | t=固定值 ≠ 相邻dt | 末端刹车或跟踪不一致 | t=相邻 time_from_start 差值 |
 | URDF velocity/effort 垃圾值 | TOTG 生成激进 bang-bang | URDF 设 0, joint_limits.yaml 管限速 |
-| has_acceleration_limits=false | TOTG 无加速度约束 → bang-bang | 设 true + 合理 max_acceleration |
+| has_acceleration_limits=false | **Jazzy TOTG 直接拒绝运行**(报错) | 必须 true + 合理 max_acceleration |
+| TOTG 无 Ruckig 平滑 | bang-bang 加速度 → jerk 无穷大 → 卡顿 | 加 `AddRuckigTrajectorySmoothing` |
 | call_async 无背压 | driver 队列堆积 → 突发下发 → 抖动 | 绝对时刻节拍对齐 (但 fire-and-forget 即可) |
 | joint_states 频率 < driver 频率 | /tf 延迟/跳变 | joint_state_publish_rate=50, 与 driver 同频 |
 | driver `sleep(0.01)` = `sleep(0)` | CPU 100% 忙轮询 | `sleep_for(1ms)` + `tcpRecv(timeout=100)` |
+| driver 单线程 spin_some + ServoJ 阻塞 | /joint_states_robot 跌到 30Hz 且不稳 | MultiThreadedExecutor + 独立 callback group |
+| 单 node 内 joint_states + ServoJ 同 executor | 线程竞争 → /joint_states 不稳 | 拆成两个独立 node (进程隔离) |
 | `DeclareBooleanLaunchAction` | ImportError (不存在) | 用 `moveit_configs_utils.launch_utils.DeclareBooleanLaunchArg` |

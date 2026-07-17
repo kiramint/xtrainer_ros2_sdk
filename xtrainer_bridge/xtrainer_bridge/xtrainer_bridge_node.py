@@ -34,7 +34,7 @@ from math import degrees
 import rclpy
 from control_msgs.action import FollowJointTrajectory
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
-from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
@@ -100,16 +100,18 @@ class XTrainerBridge(Node):
         # ── 发布者 ──
         self._joint_state_pub = self.create_publisher(JointState, '/joint_states', 10)
 
-        # ── 订阅者 ──
+        # ── 订阅者 (joint_states 合并转发用独立 MutuallyExclusive group, 避免被轨迹执行抢占) ──
+        self._js_cb_group = MutuallyExclusiveCallbackGroup()
         self._arm1_sub = self.create_subscription(
             JointState, self._arm1_state_topic,
-            self._arm1_callback, 10)
+            self._arm1_callback, 10, callback_group=self._js_cb_group)
         self._arm2_sub = self.create_subscription(
             JointState, self._arm2_state_topic,
-            self._arm2_callback, 10)
+            self._arm2_callback, 10, callback_group=self._js_cb_group)
 
         # ── ReentrantCallbackGroup (service client + action server 共用) ──
         # 双臂需要并发执行两条轨迹, 必须用 Reentrant + MultiThreadedExecutor。
+        # 注意: _pub_timer 不放这里, 否则会被轨迹执行的 time.sleep 抢占线程导致 50Hz 跌到 30Hz。
         self._cb_group = ReentrantCallbackGroup()
 
         # ── ServoJ 服务客户端 ──
@@ -132,8 +134,10 @@ class XTrainerBridge(Node):
             cancel_callback=self._cancel_callback,
             callback_group=self._cb_group)
 
-        # ── joint_states 发布定时器 (独立于轨迹执行) ──
-        self._pub_timer = self.create_timer(1.0 / self._js_rate, self._publish_joint_states)
+        # ── joint_states 发布定时器 (独立 group, 隔离于轨迹执行, 保证稳定 50Hz) ──
+        self._pub_timer = self.create_timer(
+            1.0 / self._js_rate, self._publish_joint_states,
+            callback_group=self._js_cb_group)
 
         self.get_logger().info('XTrainerBridge 初始化完成')
         self.get_logger().info(f'  左臂关节: {self._arm1_joint_names}')
@@ -323,7 +327,7 @@ class XTrainerBridge(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = XTrainerBridge()
-    executor = MultiThreadedExecutor()
+    executor = MultiThreadedExecutor(num_threads=8)
     executor.add_node(node)
     try:
         executor.spin()
