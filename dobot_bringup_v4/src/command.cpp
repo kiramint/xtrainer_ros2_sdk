@@ -127,10 +127,10 @@ void CRCommanderRos2::doTcpCmd(std::shared_ptr<TcpClient> &tcp, const char *cmd,
         char *recv_ptr = buf;
         while (true)
         {
-            bool err = tcp->tcpRecv(recv_ptr, 1024, has_read, 0);
+            bool err = tcp->tcpRecv(recv_ptr, 1024, has_read, 100);
             if (!err)
             {
-                sleep(0.01);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 continue;
             }
             if (*(recv_ptr + strlen(recv_ptr) - 1) == ';')
@@ -178,10 +178,10 @@ void CRCommanderRos2::doTcpCmd_f(std::shared_ptr<TcpClient> &tcp, const char *cm
         char *recv_ptr = buf;
         while (true)
         {
-            bool err = tcp->tcpRecv(recv_ptr, 1024, has_read, 0);
+            bool err = tcp->tcpRecv(recv_ptr, 1024, has_read, 100);
             if (!err)
             {
-                sleep(0.01);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 continue;
             }
             if (*(recv_ptr + strlen(recv_ptr) - 1) == ';')

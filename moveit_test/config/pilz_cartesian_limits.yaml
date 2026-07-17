@@ -1,6 +1,7 @@
 # Limits for the Pilz planner
+# 照官方 nova2_moveit 配置, 降低笛卡尔速度/加速度, 避免运动过于激进
 cartesian_limits:
-  max_trans_vel: 1.0
-  max_trans_acc: 2.25
-  max_trans_dec: -5.0
-  max_rot_vel: 1.57
+  max_trans_vel: 0.5
+  max_trans_acc: 1.0
+  max_trans_dec: -2.0
+  max_rot_vel: 0.785
