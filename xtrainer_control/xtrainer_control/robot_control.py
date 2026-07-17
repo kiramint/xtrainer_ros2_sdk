@@ -13,8 +13,8 @@ from typing import List, Tuple
 import rclpy
 from rclpy.node import Node
 
-from dobot_msgs_v4.srv import (DisableRobot, EnableRobot, PowerOn, RobotMode,
-                               StartDrag, StopDrag)
+from dobot_msgs_v4.srv import (ClearError, DisableRobot, EnableRobot, PowerOn,
+                               RobotMode, StartDrag, StopDrag)
 
 # RobotMode 返回值常量 (Dobot 协议)
 ROBOT_MODE_INIT = 1          # 初始化
@@ -96,9 +96,33 @@ def _get_robot_mode(node: Node, arm_namespace: str, timeout: float = 5.0) -> int
         return -1
 
 
+def clear_error_arm(node: Node, arm_namespace: str = "Arm1", timeout: float = 5.0) -> bool:
+    """
+    清除指定机械臂的报警 (ClearError)。
+
+    Args:
+        node:           ROS2 Node 实例
+        arm_namespace:  机械臂命名空间，如 'Arm1', 'Arm2'
+        timeout:        超时时间 (秒)
+
+    Returns:
+        是否成功
+    """
+    ns = arm_namespace.rstrip("/")
+    srv_name = f"/{ns}/dobot_bringup_ros2/srv/ClearError"
+
+    node.get_logger().info(f"[{ns}] ClearError ...")
+    ok, res = _call_service(node, ClearError, srv_name, timeout)
+    if not ok:
+        node.get_logger().error(f"[{ns}] ClearError failed")
+        return False
+    node.get_logger().info(f"[{ns}] ClearError OK (res={res})")
+    return True
+
+
 def enable_arm(node: Node, arm_namespace: str = "Arm1", timeout: float = 30.0) -> bool:
     """
-    使能指定机械臂: 先 PowerOn，等待上电完成，再 EnableRobot。
+    使能指定机械臂: ClearError → PowerOn → 等待上电完成 → EnableRobot。
 
     Dobot 协议要求 PowerOn 后需约 10 秒完成初始化，
     通过轮询 RobotMode 来精确等待。
@@ -112,6 +136,7 @@ def enable_arm(node: Node, arm_namespace: str = "Arm1", timeout: float = 30.0) -
         是否成功使能
     """
     ns = arm_namespace.rstrip("/")
+    clearerror_srv = f"/{ns}/dobot_bringup_ros2/srv/ClearError"
     poweron_srv = f"/{ns}/dobot_bringup_ros2/srv/PowerOn"
     enable_srv = f"/{ns}/dobot_bringup_ros2/srv/EnableRobot"
 
@@ -122,16 +147,25 @@ def enable_arm(node: Node, arm_namespace: str = "Arm1", timeout: float = 30.0) -
         node.get_logger().info(f"[{ns}] Already enabled (mode={mode}), skipping")
         return True
 
-    # ── Step 1: PowerOn ──
-    node.get_logger().info(f"[{ns}] Step 1/3: PowerOn ...")
+    # ── Step 1: ClearError (清除上次的报警) ──
+    node.get_logger().info(f"[{ns}] Step 1/4: ClearError ...")
+    ok, res = _call_service(node, ClearError, clearerror_srv, timeout)
+    if not ok:
+        node.get_logger().error(f"[{ns}] ClearError failed")
+        # 不返回 False，ClearError 失败不影响后续流程
+    else:
+        node.get_logger().info(f"[{ns}] ClearError OK (res={res})")
+
+    # ── Step 2: PowerOn ──
+    node.get_logger().info(f"[{ns}] Step 2/4: PowerOn ...")
     ok, res = _call_service(node, PowerOn, poweron_srv, timeout)
     if not ok:
         node.get_logger().error(f"[{ns}] PowerOn failed")
         return False
     node.get_logger().info(f"[{ns}] PowerOn OK (res={res})")
 
-    # ── Step 2: Wait for power-on to complete (mode ≥ 4) ──
-    node.get_logger().info(f"[{ns}] Step 2/3: Waiting for power-on to complete ...")
+    # ── Step 3: Wait for power-on to complete (mode ≥ 4) ──
+    node.get_logger().info(f"[{ns}] Step 3/4: Waiting for power-on to complete ...")
     start = time.time()
     while time.time() - start < timeout:
         mode = _get_robot_mode(node, ns)
@@ -148,8 +182,8 @@ def enable_arm(node: Node, arm_namespace: str = "Arm1", timeout: float = 30.0) -
 
     node.get_logger().info(f"[{ns}] Power-on complete, mode={mode}")
 
-    # ── Step 3: EnableRobot ──
-    node.get_logger().info(f"[{ns}] Step 3/3: EnableRobot ...")
+    # ── Step 4: EnableRobot ──
+    node.get_logger().info(f"[{ns}] Step 4/4: EnableRobot ...")
     ok, res = _call_service(node, EnableRobot, enable_srv, timeout)
     if not ok:
         node.get_logger().error(f"[{ns}] EnableRobot failed (res={res})")

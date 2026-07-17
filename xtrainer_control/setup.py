@@ -17,6 +17,7 @@ setup(
         ('share/' + package_name + '/launch', ['launch/enable.launch.py']),
         ('share/' + package_name + '/launch', ['launch/disable.launch.py']),
         ('share/' + package_name + '/launch', ['launch/enable_and_drag.launch.py']),
+        ('share/' + package_name + '/launch', ['launch/clear_error.launch.py']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -34,6 +35,7 @@ setup(
             'enable_arms = xtrainer_control.enable_arms:main',
             'disable_arms = xtrainer_control.disable_arms:main',
             'enable_and_drag = xtrainer_control.enable_and_drag:main',
+            'clear_error = xtrainer_control.clear_error:main',
         ],
     },
 )
