@@ -4,11 +4,17 @@
 
 功能:
   演示夹爪的基本开合操作 —— 张开 → 闭合 → 张开，循环 3 次。
-  通过发布 /gripper/command 话题控制夹爪，订阅 /gripper/state 获取反馈。
+  通过发布 ~/command 话题控制夹爪，订阅 ~/state 获取反馈。
+
+用法:
+  # 单夹爪测试 (默认 /gripper_1 命名空间)
+  ros2 run xtrainer_gripper gripper_open_close_demo
+
+  # 指定命名空间 (如 /gripper_2)
+  ros2 run xtrainer_gripper gripper_open_close_demo --ros-args -r __ns:=/gripper_2
 
 依赖:
   - 先启动 xtrainer_gripper 节点: ros2 launch xtrainer_gripper gripper.launch.py
-  - 然后运行: python3 demo/gripper_open_close_demo.py
 """
 
 import sys
@@ -25,20 +31,25 @@ class GripperOpenCloseDemo(Node):
     def __init__(self):
         super().__init__("gripper_open_close_demo")
 
+        self.declare_parameter("gripper_ns", "/gripper_1")
+        gripper_ns = self.get_parameter("gripper_ns").value
+
         self._cmd_pub = self.create_publisher(
-            Float32MultiArray, "/gripper/command", 10
+            Float32MultiArray, f"{gripper_ns}/command", 10
         )
         self._status_sub = self.create_subscription(
-            String, "/gripper/status", self._status_callback, 10
+            String, f"{gripper_ns}/status", self._status_callback, 10
         )
         self._state_sub = self.create_subscription(
-            Float32MultiArray, "/gripper/state", self._state_callback, 10
+            Float32MultiArray, f"{gripper_ns}/state", self._state_callback, 10
         )
 
         self._current_status = "UNKNOWN"
         self._current_state = [0.0, 0.0]
 
-        self.get_logger().info("夹爪开合 Demo 启动")
+        self.get_logger().info(
+            f"夹爪开合 Demo 启动 (目标命名空间: {gripper_ns})"
+        )
 
     def _status_callback(self, msg: String):
         self._current_status = msg.data

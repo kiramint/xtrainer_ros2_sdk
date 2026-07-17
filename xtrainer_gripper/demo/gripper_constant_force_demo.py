@@ -7,17 +7,23 @@
   夹爪以缓慢速度闭合，当检测到负载超过阈值时停止，
   如果物体滑脱（负载下降），自动补夹。
 
+用法:
+  # 默认 /gripper_1 命名空间
+  ros2 run xtrainer_gripper gripper_constant_force_demo
+
+  # 指定命名空间
+  ros2 run xtrainer_gripper gripper_constant_force_demo --ros-args -p gripper_ns:=/gripper_2
+
 工作原理:
   1. 夹爪全开
   2. 缓慢闭合 (speed≈0.3)
-  3. 实时监控 /gripper/state 中的 load 值
+  3. 实时监控 ~/state 中的 load 值
   4. 当 load > force_threshold 时 → 停止闭合 (物体已夹住)
   5. 保持监控：若 load 下降 (物体滑脱) → 自动补夹半步
   6. 用户 Ctrl+C 退出，夹爪自动张开释放
 
 依赖:
   - 先启动 xtrainer_gripper 节点: ros2 launch xtrainer_gripper gripper.launch.py
-  - 然后运行: python3 demo/gripper_constant_force_demo.py
 
 参数 (可修改):
   force_threshold — 负载阈值, 0.0~1.0 (默认 0.15, 即额定力矩的 15%)
@@ -48,14 +54,17 @@ class ConstantForceDemo(Node):
     def __init__(self):
         super().__init__("constant_force_demo")
 
+        self.declare_parameter("gripper_ns", "/gripper_1")
+        gripper_ns = self.get_parameter("gripper_ns").value
+
         self._cmd_pub = self.create_publisher(
-            Float32MultiArray, "/gripper/command", 10
+            Float32MultiArray, f"{gripper_ns}/command", 10
         )
         self._status_sub = self.create_subscription(
-            String, "/gripper/status", self._status_callback, 10
+            String, f"{gripper_ns}/status", self._status_callback, 10
         )
         self._state_sub = self.create_subscription(
-            Float32MultiArray, "/gripper/state", self._state_callback, 10
+            Float32MultiArray, f"{gripper_ns}/state", self._state_callback, 10
         )
 
         self._current_position = 0.0
@@ -65,7 +74,7 @@ class ConstantForceDemo(Node):
         self._held_load = 0.0
 
         self.get_logger().info("=" * 50)
-        self.get_logger().info("  恒力夹取 Demo 启动")
+        self.get_logger().info(f"  恒力夹取 Demo 启动 (目标: {gripper_ns})")
         self.get_logger().info(f"  阈值: {FORCE_THRESHOLD:.2f}  速度: {CLOSE_SPEED:.2f}")
         self.get_logger().info("=" * 50)
 

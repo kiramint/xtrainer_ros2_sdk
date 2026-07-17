@@ -5,10 +5,10 @@ xtrainer_gripper: 独立夹爪 ROS2 驱动节点
 通过 USB-485 控制 Feetech SMS/STS 系列舵机夹爪。
 与其他模块 (dobot_bringup, xtrainer_bridge) 完全解耦。
 
-话题:
-  /gripper/command       (std_msgs/Float32MultiArray)  — [position, speed]
-  /gripper/state         (std_msgs/Float32MultiArray)  — [position, current_raw]
-  /gripper/status        (std_msgs/String)             — "OPENED" / "CLOSED" / "MOVING"
+话题 (使用节点命名空间隔离，如 /gripper_1/command):
+  ~/command  (std_msgs/Float32MultiArray)  — [position, speed]
+  ~/state    (std_msgs/Float32MultiArray)  — [position, load]
+  ~/status   (std_msgs/String)             — "OPENED" / "CLOSED" / "MOVING"
 
 参数:
   port          — 串口设备 (默认 /dev/ttyUSB0)
@@ -16,11 +16,12 @@ xtrainer_gripper: 独立夹爪 ROS2 驱动节点
   servo_min_pos — 舵机内部最小位置 (默认 2048)
   servo_max_pos — 舵机内部最大位置 (默认 3998)
   publish_rate  — 状态发布频率 Hz (默认 20)
+  torque_limit  — 力矩限制 0~1000 (默认 300)
 """
 
 import os
-import struct
 import subprocess
+import threading
 import time
 
 import rclpy
@@ -56,7 +57,7 @@ class GripperNode(Node):
         self.declare_parameter("servo_min_pos", 2048)
         self.declare_parameter("servo_max_pos", 3998)
         self.declare_parameter("publish_rate", 20.0)
-        self.declare_parameter("torque_limit", 0.5)
+        self.declare_parameter("torque_limit", 300)
 
         port = self.get_parameter("port").value
         self._servo_id = self.get_parameter("servo_id").value
@@ -76,39 +77,79 @@ class GripperNode(Node):
         self._servo = sms_sts(self._port_handler)
         self._port_handler.setBaudRate(1000000)
 
-        # Torque Enable
-        self._pack_handler.write1ByteTxRx(self._servo_id, 40, 1)
+        # 1) Ping 验证连接（最先执行，确认舵机能通信）
+        model_number, result, error = self._servo.ping(self._servo_id)
+        if error == 0 and result == 0:
+            self.get_logger().info(f"Ping OK: ID={self._servo_id}, model={model_number}")
+        else:
+            self.get_logger().error(
+                f"Ping 失败: result={result}, error={error}. "
+                f"请检查串口 {port} 和舵机 ID {self._servo_id}"
+            )
+
+        # 2) Torque Enable
+        ft_comm_result, ft_error = self._pack_handler.write1ByteTxRx(
+            self._servo_id, 40, 1
+        )
+        if ft_comm_result != 0 or ft_error != 0:
+            self.get_logger().warn(
+                f"Torque Enable 失败: comm_result={ft_comm_result}, error={ft_error}"
+            )
+
+        # 3) 力矩限制 (register 48 = 0x30, 范围 0~1000)
+        ft_comm_result, ft_error = self._pack_handler.write2ByteTxRx(
+            self._servo_id, 48, torque_limit
+        )
+        if ft_comm_result != 0 or ft_error != 0:
+            self.get_logger().error(
+                f"力矩限制设置失败: comm_result={ft_comm_result}, error={ft_error}"
+            )
+        else:
+            self.get_logger().info(f"力矩限制已设置: {torque_limit}")
 
         self.get_logger().info(
             f"夹爪初始化完成 port={port}, id={self._servo_id}, "
             f"servo_range=[{self._servo_min}, {self._servo_max}]"
         )
 
-        # ── 话题 ──
+        # ── 话题 (相对路径, 自动前缀 namespace, 如 /gripper_1/command) ──
         self._cmd_sub = self.create_subscription(
-            Float32MultiArray, "/gripper/command", self._cmd_callback, 10
+            Float32MultiArray, "command", self._cmd_callback, 10
         )
-        self._state_pub = self.create_publisher(Float32MultiArray, "/gripper/state", 10)
-        self._status_pub = self.create_publisher(String, "/gripper/status", 10)
+        self._state_pub = self.create_publisher(Float32MultiArray, "state", 10)
+        self._status_pub = self.create_publisher(String, "status", 10)
 
         # ── 定时发布状态 ──
         self._timer = self.create_timer(1.0 / pub_rate, self._publish_state)
 
-        # ── 状态缓存 ──
+        # ── 线程安全: 舵机命令串行化 ──
+        self._cmd_lock = threading.Lock()
         self._target_position = 0.0
+        self._latest_cmd = None  # (position, speed)
+
+        # ── 命令消费定时器: 在独立 tick 中执行舵机通信，避免阻塞 executor ──
+        self._cmd_timer = self.create_timer(0.03, self._process_command)
 
     # ═══════════════════════════════════════════════════════════════
-    #  命令回调
+    #  命令回调 (线程安全, 仅缓存最新命令)
     # ═══════════════════════════════════════════════════════════════
 
     def _cmd_callback(self, msg: Float32MultiArray):
-        """接收 [position, speed] 命令"""
+        """接收 [position, speed] 命令，缓存后在独立 tick 中执行"""
         data = list(msg.data)
         if len(data) < 1:
             return
         position = max(self._OUT_MIN, min(self._OUT_MAX, float(data[0])))
         speed = max(0.0, min(1.0, float(data[1]))) if len(data) >= 2 else 1.0
         self._target_position = position
+        self._latest_cmd = (position, speed)
+
+    def _process_command(self):
+        """独立 tick 中执行舵机通信，避免阻塞 ROS executor"""
+        if self._latest_cmd is None:
+            return
+        position, speed = self._latest_cmd
+        self._latest_cmd = None  # 清空，避免重复发送
         self._move(position, speed)
 
     # ═══════════════════════════════════════════════════════════════
@@ -122,12 +163,13 @@ class GripperNode(Node):
         return (raw - self._servo_min) / (self._servo_max - self._servo_min)
 
     def _move(self, position: float, speed: float):
-        """移动夹爪到指定位置"""
+        """移动夹爪到指定位置 (同步调用，在 _process_command tick 中执行)"""
         target_pos = self._normalized_to_servo(position)
         target_speed = int(speed * 4095)  # 0~4095
-        result, error = self._servo.WritePosEx(
-            self._servo_id, target_pos, target_speed, 0
-        )
+        with self._cmd_lock:  # 串行化舵机通信
+            result, error = self._servo.WritePosEx(
+                self._servo_id, target_pos, target_speed, 0
+            )
         if result != 0 or error != 0:
             self.get_logger().error(
                 f"WritePosEx failed: result={result}, error={error}"
@@ -135,8 +177,13 @@ class GripperNode(Node):
 
     def _read_position(self) -> float:
         """读取当前位置 (归一化 0~1)"""
-        raw, result, error = self._servo.ReadPos(self._servo_id)
+        with self._cmd_lock:
+            raw, result, error = self._servo.ReadPos(self._servo_id)
         if result != 0 or error != 0:
+            self.get_logger().debug(
+                f"ReadPos failed: result={result}, error={error}",
+                throttle_duration_sec=5.0,
+            )
             return -1.0
         return self._servo_to_normalized(raw)
 
@@ -144,10 +191,15 @@ class GripperNode(Node):
         """读取当前负载 (归一化 0~1), 用于力反馈估算
         SMS_STS_PRESENT_LOAD_L = 60, 负载值范围 0~1000 (对应 0%~100% 额定力矩)
         """
-        raw, result, error = self._pack_handler.read2ByteTxRx(
-            self._servo_id, SMS_STS_PRESENT_LOAD_L
-        )
+        with self._cmd_lock:
+            raw, result, error = self._pack_handler.read2ByteTxRx(
+                self._servo_id, SMS_STS_PRESENT_LOAD_L
+            )
         if result != 0 or error != 0:
+            self.get_logger().debug(
+                f"ReadLoad failed: result={result}, error={error}",
+                throttle_duration_sec=5.0,
+            )
             return -1.0
         return raw / 1000.0  # 归一化到 0~1
 

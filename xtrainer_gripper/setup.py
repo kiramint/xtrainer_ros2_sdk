@@ -22,6 +22,9 @@ setup(
     entry_points={
         'console_scripts': [
             'gripper_node = xtrainer_gripper.gripper_node:main',
+            'gripper_open_close_demo = demo.gripper_open_close_demo:main',
+            'gripper_constant_force_demo = demo.gripper_constant_force_demo:main',
+            'scan_servo_id = demo.scan_servo_id:main',
         ],
     },
 )
