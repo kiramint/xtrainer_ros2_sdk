@@ -23,8 +23,6 @@ Arm1_controller:
       - J1_4
       - J1_5
       - J1_6
-      - J1_7
-      - J1_8
     command_interfaces:
       - position
     state_interfaces:
@@ -40,8 +38,6 @@ Arm2_controller:
       - J2_4
       - J2_5
       - J2_6
-      - J2_7
-      - J2_8
     command_interfaces:
       - position
     state_interfaces:

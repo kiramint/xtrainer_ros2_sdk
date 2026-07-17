@@ -1,14 +1,16 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="x_trainer">
-    <xacro:arg name="initial_positions_file" default="initial_positions.yaml" />
+    <!--
+        注意: 不使用 ros2_control / mock_components/GenericSystem。
+        机械臂控制由 xtrainer_bridge 直接桥接
+        FollowJointTrajectory -> Dobot ServoJ 服务实现，
+        若在此处再注册 ros2_control hardware(<ros2_control> 标签)，
+        JointTrajectoryController 会在同名 /ArmX_controller/follow_joint_trajectory
+        上创建 action server，与 xtrainer_bridge 冲突，
+        导致 MoveIt 报 "unknown goal response / unknown result response"。
+    -->
 
     <!-- Import x_trainer urdf file -->
     <xacro:include filename="$(find xtrainer_description)/urdf/x_trainer.urdf" />
-
-    <!-- Import control_xacro -->
-    <xacro:include filename="x_trainer.ros2_control.xacro" />
-
-
-    <xacro:x_trainer_ros2_control name="FakeSystem" initial_positions_file="$(arg initial_positions_file)"/>
 
 </robot>

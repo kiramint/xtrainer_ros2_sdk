@@ -9,7 +9,6 @@ moveit_simple_controller_manager:
 
   Arm1_controller:
     type: FollowJointTrajectory
-    action_ns: follow_joint_trajectory
     joints:
       - J1_1
       - J1_2
@@ -17,9 +16,9 @@ moveit_simple_controller_manager:
       - J1_4
       - J1_5
       - J1_6
+    action_ns: follow_joint_trajectory
   Arm2_controller:
     type: FollowJointTrajectory
-    action_ns: follow_joint_trajectory
     joints:
       - J2_1
       - J2_2
@@ -27,3 +26,4 @@ moveit_simple_controller_manager:
       - J2_4
       - J2_5
       - J2_6
+    action_ns: follow_joint_trajectory

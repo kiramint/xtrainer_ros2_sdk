@@ -11,9 +11,11 @@
     <!--SUBGROUPS: Groups can also be formed by referencing to already defined group names-->
     <group name="Arm1">
         <chain base_link="base_link" tip_link="L1_6"/>
+        <link name="L1_gripper_tcp"/>
     </group>
     <group name="Arm2">
         <chain base_link="base_link" tip_link="L2_6"/>
+        <link name="L2_gripper_tcp"/>
     </group>
     <group name="Gripper1">
         <link name="L1_7"/>
@@ -78,18 +80,22 @@
     <passive_joint name="J4_4"/>
     <passive_joint name="J4_5"/>
     <passive_joint name="J4_6"/>
+    <passive_joint name="J1_7"/>
+    <passive_joint name="J1_8"/>
+    <passive_joint name="J2_7"/>
+    <passive_joint name="J2_8"/>
     <!--DISABLE COLLISIONS: By default it is assumed that any link of the robot could potentially come into collision with any other link in the robot. This tag disables collision checking between a specified pair of links. -->
     <disable_collisions link1="L1_6" link2="L1_7" reason="Adjacent"/>
     <disable_collisions link1="L1_6" link2="L1_8" reason="Adjacent"/>
     <disable_collisions link1="L1_6" link2="L1_gripper_tcp" reason="Adjacent"/>
-    <disable_collisions link1="L1_7" link2="L1_gripper_tcp" reason="Adjacent"/>
-    <disable_collisions link1="L1_8" link2="L1_gripper_tcp" reason="Adjacent"/>
     <disable_collisions link1="L1_6" link2="L2_6" reason="Adjacent"/>
     <disable_collisions link1="L1_6" link2="L2_7" reason="Never"/>
     <disable_collisions link1="L1_6" link2="L2_8" reason="Never"/>
+    <disable_collisions link1="L1_7" link2="L1_gripper_tcp" reason="Adjacent"/>
     <disable_collisions link1="L1_7" link2="L2_6" reason="Never"/>
     <disable_collisions link1="L1_7" link2="L2_7" reason="Never"/>
     <disable_collisions link1="L1_7" link2="L2_8" reason="Never"/>
+    <disable_collisions link1="L1_8" link2="L1_gripper_tcp" reason="Adjacent"/>
     <disable_collisions link1="L1_8" link2="L2_6" reason="Never"/>
     <disable_collisions link1="L1_8" link2="L2_7" reason="Never"/>
     <disable_collisions link1="L1_8" link2="L2_8" reason="Never"/>

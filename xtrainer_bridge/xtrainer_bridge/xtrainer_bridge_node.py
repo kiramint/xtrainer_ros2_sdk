@@ -20,6 +20,7 @@ xtrainer_bridge_node: 双臂桥接节点
 import threading
 import time
 from collections import OrderedDict
+from math import degrees
 
 import rclpy
 from builtin_interfaces.msg import Duration
@@ -49,6 +50,17 @@ class XTrainerBridge(Node):
         self.declare_parameter('arm2_joint_state_topic', '/Arm2/joint_states_robot')
         self.declare_parameter('control_frequency', 50.0)       # 控制循环频率 (Hz)
         self.declare_parameter('action_timeout', 30.0)          # action 超时 (秒)
+        # ServoJ 预测时间 t (秒):
+        #   Dobot CR 协议的 ServoJ 可选参数, 控制器据此做轨迹前瞻插补。
+        #   文档取值范围 [0.02, 3600.0], 默认 0.1。
+        #   循环调用频率建议 33Hz (30ms 间隔), t 取周期的 2~3 倍较稳。
+        self.declare_parameter('servoj_predictive_time', 0.05)
+        # ServoJ 目标角度单位:
+        #   'rad' — 从 MoveIt 接收弧度, 发送前转成度 (Dobot 协议要求度)
+        #   'deg' — 已是度, 直接发送
+        # 驱动发布的 joint_states_robot 是弧度 (command.cpp 把 q_actual deg2Rad),
+        # MoveIt 规划也是弧度, 故默认 rad 并在 _send_servoj 转换。
+        self.declare_parameter('servoj_angle_unit', 'rad')
 
         self._arm1_joint_names = self.get_parameter('arm1_joint_names').value
         self._arm2_joint_names = self.get_parameter('arm2_joint_names').value
@@ -58,6 +70,8 @@ class XTrainerBridge(Node):
         self._arm2_state_topic = self.get_parameter('arm2_joint_state_topic').value
         self._ctrl_freq = self.get_parameter('control_frequency').value
         self._action_timeout = self.get_parameter('action_timeout').value
+        self._servoj_t = float(self.get_parameter('servoj_predictive_time').value)
+        self._servoj_unit = str(self.get_parameter('servoj_angle_unit').value).lower()
 
         self._all_joint_names = self._arm1_joint_names + self._arm2_joint_names
 
@@ -105,6 +119,9 @@ class XTrainerBridge(Node):
         self.get_logger().info(f'  右臂关节: {self._arm2_joint_names}')
         self.get_logger().info(f'  Action: /Arm1_controller/follow_joint_trajectory')
         self.get_logger().info(f'  Action: /Arm2_controller/follow_joint_trajectory')
+        unit_msg = f'{self._servoj_unit}->deg' if self._servoj_unit == 'rad' else 'deg'
+        self.get_logger().info(f'  ServoJ: t={self._servoj_t:.3f}s, 单位={unit_msg} '
+                               f'(周期={1.0/self._ctrl_freq*1000:.1f}ms)')
 
     # ═══════════════════════════════════════════════════════════════
     #  关节状态回调
@@ -222,15 +239,28 @@ class XTrainerBridge(Node):
         return True
 
     def _send_servoj(self, client, positions: list[float], joint_names: list[str]):
-        """发送 ServoJ 请求"""
+        """
+        发送 ServoJ 请求。
+
+        关键 1 (单位): Dobot CR 协议ServoJ 的 J1~J6 单位是 **度**,
+        而 MoveIt 规划出来是弧度 (ROS REP-103), 必须做 rad->deg 转换,
+        否则控制器会把 0.138 当成 0.138 度, 目标几乎在零位, 实际几乎不动。
+        关键 2 (t): ServoJ 是流式伺服指令, 建 param_value 带 t=<预测时间>,
+        控制器据此做轨迹前瞻插补; 文档取值 [0.02,3600.0], 默认 0.1。
+        命令最终形如: ServoJ(J1,...,J6,t=0.05)  其中 Ji 为度。
+        """
+        if self._servoj_unit == 'rad':
+            target = [degrees(p) for p in positions]
+        else:
+            target = list(positions)
         req = ServoJ.Request()
-        req.a = positions[0] if len(positions) > 0 else 0.0
-        req.b = positions[1] if len(positions) > 1 else 0.0
-        req.c = positions[2] if len(positions) > 2 else 0.0
-        req.d = positions[3] if len(positions) > 3 else 0.0
-        req.e = positions[4] if len(positions) > 4 else 0.0
-        req.f = positions[5] if len(positions) > 5 else 0.0
-        req.param_value = joint_names if joint_names else []
+        req.a = target[0] if len(target) > 0 else 0.0
+        req.b = target[1] if len(target) > 1 else 0.0
+        req.c = target[2] if len(target) > 2 else 0.0
+        req.d = target[3] if len(target) > 3 else 0.0
+        req.e = target[4] if len(target) > 4 else 0.0
+        req.f = target[5] if len(target) > 5 else 0.0
+        req.param_value = [f't={self._servoj_t:.4f}']
         client.call_async(req)  # fire-and-forget 实现高频控制
 
     @staticmethod

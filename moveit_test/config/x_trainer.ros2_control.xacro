@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
-<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+<robot 
+    xmlns:xacro="http://www.ros.org/wiki/xacro">
     <xacro:macro name="x_trainer_ros2_control" params="name initial_positions_file">
         <xacro:property name="initial_positions" value="${xacro.load_yaml(initial_positions_file)['initial_positions']}"/>
-
         <ros2_control name="${name}" type="system">
             <hardware>
                 <!-- By default, set up controllers for simulation. This won't work on real hardware -->
@@ -11,116 +11,167 @@
             <joint name="J1_1">
                 <command_interface name="position"/>
                 <state_interface name="position">
-                  <param name="initial_value">${initial_positions['J1_1']}</param>
+                    <param name="initial_value">${initial_positions['J1_1']}</param>
                 </state_interface>
                 <state_interface name="velocity"/>
             </joint>
             <joint name="J1_2">
                 <command_interface name="position"/>
                 <state_interface name="position">
-                  <param name="initial_value">${initial_positions['J1_2']}</param>
+                    <param name="initial_value">${initial_positions['J1_2']}</param>
                 </state_interface>
                 <state_interface name="velocity"/>
             </joint>
             <joint name="J1_3">
                 <command_interface name="position"/>
                 <state_interface name="position">
-                  <param name="initial_value">${initial_positions['J1_3']}</param>
+                    <param name="initial_value">${initial_positions['J1_3']}</param>
                 </state_interface>
                 <state_interface name="velocity"/>
             </joint>
             <joint name="J1_4">
                 <command_interface name="position"/>
                 <state_interface name="position">
-                  <param name="initial_value">${initial_positions['J1_4']}</param>
+                    <param name="initial_value">${initial_positions['J1_4']}</param>
                 </state_interface>
                 <state_interface name="velocity"/>
             </joint>
             <joint name="J1_5">
                 <command_interface name="position"/>
                 <state_interface name="position">
-                  <param name="initial_value">${initial_positions['J1_5']}</param>
+                    <param name="initial_value">${initial_positions['J1_5']}</param>
                 </state_interface>
                 <state_interface name="velocity"/>
             </joint>
             <joint name="J1_6">
                 <command_interface name="position"/>
                 <state_interface name="position">
-                  <param name="initial_value">${initial_positions['J1_6']}</param>
-                </state_interface>
-                <state_interface name="velocity"/>
-            </joint>
-            <joint name="J1_7">
-                <command_interface name="position"/>
-                <state_interface name="position">
-                  <param name="initial_value">${initial_positions['J1_7']}</param>
-                </state_interface>
-                <state_interface name="velocity"/>
-            </joint>
-            <joint name="J1_8">
-                <command_interface name="position"/>
-                <state_interface name="position">
-                  <param name="initial_value">${initial_positions['J1_8']}</param>
+                    <param name="initial_value">${initial_positions['J1_6']}</param>
                 </state_interface>
                 <state_interface name="velocity"/>
             </joint>
             <joint name="J2_1">
                 <command_interface name="position"/>
                 <state_interface name="position">
-                  <param name="initial_value">${initial_positions['J2_1']}</param>
+                    <param name="initial_value">${initial_positions['J2_1']}</param>
                 </state_interface>
                 <state_interface name="velocity"/>
             </joint>
             <joint name="J2_2">
                 <command_interface name="position"/>
                 <state_interface name="position">
-                  <param name="initial_value">${initial_positions['J2_2']}</param>
+                    <param name="initial_value">${initial_positions['J2_2']}</param>
                 </state_interface>
                 <state_interface name="velocity"/>
             </joint>
             <joint name="J2_3">
                 <command_interface name="position"/>
                 <state_interface name="position">
-                  <param name="initial_value">${initial_positions['J2_3']}</param>
+                    <param name="initial_value">${initial_positions['J2_3']}</param>
                 </state_interface>
                 <state_interface name="velocity"/>
             </joint>
             <joint name="J2_4">
                 <command_interface name="position"/>
                 <state_interface name="position">
-                  <param name="initial_value">${initial_positions['J2_4']}</param>
+                    <param name="initial_value">${initial_positions['J2_4']}</param>
                 </state_interface>
                 <state_interface name="velocity"/>
             </joint>
             <joint name="J2_5">
                 <command_interface name="position"/>
                 <state_interface name="position">
-                  <param name="initial_value">${initial_positions['J2_5']}</param>
+                    <param name="initial_value">${initial_positions['J2_5']}</param>
                 </state_interface>
                 <state_interface name="velocity"/>
             </joint>
             <joint name="J2_6">
                 <command_interface name="position"/>
                 <state_interface name="position">
-                  <param name="initial_value">${initial_positions['J2_6']}</param>
+                    <param name="initial_value">${initial_positions['J2_6']}</param>
                 </state_interface>
                 <state_interface name="velocity"/>
+            </joint>
+            <joint name="J1_7">
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['J1_7']}</param>
+                </state_interface>
+            </joint>
+            <joint name="J1_8">
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['J1_8']}</param>
+                </state_interface>
             </joint>
             <joint name="J2_7">
-                <command_interface name="position"/>
                 <state_interface name="position">
-                  <param name="initial_value">${initial_positions['J2_7']}</param>
+                    <param name="initial_value">${initial_positions['J2_7']}</param>
                 </state_interface>
-                <state_interface name="velocity"/>
             </joint>
             <joint name="J2_8">
-                <command_interface name="position"/>
                 <state_interface name="position">
-                  <param name="initial_value">${initial_positions['J2_8']}</param>
+                    <param name="initial_value">${initial_positions['J2_8']}</param>
                 </state_interface>
-                <state_interface name="velocity"/>
             </joint>
-
+            <joint name="J3_1">
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['J3_1']}</param>
+                </state_interface>
+            </joint>
+            <joint name="J3_2">
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['J3_2']}</param>
+                </state_interface>
+            </joint>
+            <joint name="J3_3">
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['J3_3']}</param>
+                </state_interface>
+            </joint>
+            <joint name="J3_4">
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['J3_4']}</param>
+                </state_interface>
+            </joint>
+            <joint name="J3_5">
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['J3_5']}</param>
+                </state_interface>
+            </joint>
+            <joint name="J3_6">
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['J3_6']}</param>
+                </state_interface>
+            </joint>
+            <joint name="J4_1">
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['J4_1']}</param>
+                </state_interface>
+            </joint>
+            <joint name="J4_2">
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['J4_2']}</param>
+                </state_interface>
+            </joint>
+            <joint name="J4_3">
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['J4_3']}</param>
+                </state_interface>
+            </joint>
+            <joint name="J4_4">
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['J4_4']}</param>
+                </state_interface>
+            </joint>
+            <joint name="J4_5">
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['J4_5']}</param>
+                </state_interface>
+            </joint>
+            <joint name="J4_6">
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['J4_6']}</param>
+                </state_interface>
+            </joint>
         </ros2_control>
     </xacro:macro>
 </robot>

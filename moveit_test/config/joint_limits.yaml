@@ -11,33 +11,33 @@ joint_limits:
   J1_1:
     has_velocity_limits: true
     max_velocity: 5.9390473352549877e+36
-    has_acceleration_limits: false
-    max_acceleration: 0
+    has_acceleration_limits: true
+    max_acceleration: 15.0
   J1_2:
     has_velocity_limits: true
     max_velocity: 5.9390473352549877e+36
-    has_acceleration_limits: false
-    max_acceleration: 0
+    has_acceleration_limits: true
+    max_acceleration: 7.5
   J1_3:
     has_velocity_limits: true
     max_velocity: 5.9390473352549877e+36
-    has_acceleration_limits: false
-    max_acceleration: 0
+    has_acceleration_limits: true
+    max_acceleration: 10.0
   J1_4:
     has_velocity_limits: true
     max_velocity: 5.9390473352549877e+36
-    has_acceleration_limits: false
-    max_acceleration: 0
+    has_acceleration_limits: true
+    max_acceleration: 12.5
   J1_5:
     has_velocity_limits: true
     max_velocity: 5.9390473352549877e+36
-    has_acceleration_limits: false
-    max_acceleration: 0
+    has_acceleration_limits: true
+    max_acceleration: 12.5
   J1_6:
     has_velocity_limits: true
     max_velocity: 5.9390473352549877e+36
-    has_acceleration_limits: false
-    max_acceleration: 0
+    has_acceleration_limits: true
+    max_acceleration: 15.0
   J1_7:
     has_velocity_limits: true
     max_velocity: 3.4028234663852886e+38
@@ -51,33 +51,33 @@ joint_limits:
   J2_1:
     has_velocity_limits: true
     max_velocity: 5.9390473352549877e+36
-    has_acceleration_limits: false
-    max_acceleration: 0
+    has_acceleration_limits: true
+    max_acceleration: 15.0
   J2_2:
     has_velocity_limits: true
     max_velocity: 5.9390473352549877e+36
-    has_acceleration_limits: false
-    max_acceleration: 0
+    has_acceleration_limits: true
+    max_acceleration: 7.5
   J2_3:
     has_velocity_limits: true
     max_velocity: 5.9390473352549877e+36
-    has_acceleration_limits: false
-    max_acceleration: 0
+    has_acceleration_limits: true
+    max_acceleration: 10.0
   J2_4:
     has_velocity_limits: true
     max_velocity: 5.9390473352549877e+36
-    has_acceleration_limits: false
-    max_acceleration: 0
+    has_acceleration_limits: true
+    max_acceleration: 12.5
   J2_5:
     has_velocity_limits: true
     max_velocity: 5.9390473352549877e+36
-    has_acceleration_limits: false
-    max_acceleration: 0
+    has_acceleration_limits: true
+    max_acceleration: 12.5
   J2_6:
     has_velocity_limits: true
     max_velocity: 5.9390473352549877e+36
-    has_acceleration_limits: false
-    max_acceleration: 0
+    has_acceleration_limits: true
+    max_acceleration: 15.0
   J2_7:
     has_velocity_limits: true
     max_velocity: 3.4028234663852886e+38
