@@ -4,20 +4,22 @@
 
 功能:
   演示夹爪的基本开合操作 —— 张开 → 闭合 → 张开，循环 3 次。
-  通过发布 ~/command 话题控制夹爪，订阅 ~/state 获取反馈。
+  通过发布 ~/left/command 或 ~/right/command 话题控制夹爪，订阅 ~/left/state 等获取反馈。
 
 用法:
-  # 单夹爪测试 (默认 /gripper_1 命名空间)
+  # 测试左夹爪 (默认)
   ros2 run xtrainer_gripper gripper_open_close_demo
 
-  # 指定命名空间 (如 /gripper_2)
-  ros2 run xtrainer_gripper gripper_open_close_demo --ros-args -r __ns:=/gripper_2
+  # 测试右夹爪
+  ros2 run xtrainer_gripper gripper_open_close_demo --ros-args -p gripper_side:=right
+
+  # 指定命名空间
+  ros2 run xtrainer_gripper gripper_open_close_demo --ros-args -p gripper_ns:=/gripper
 
 依赖:
   - 先启动 xtrainer_gripper 节点: ros2 launch xtrainer_gripper gripper.launch.py
 """
 
-import sys
 import time
 
 import rclpy
@@ -31,24 +33,28 @@ class GripperOpenCloseDemo(Node):
     def __init__(self):
         super().__init__("gripper_open_close_demo")
 
-        self.declare_parameter("gripper_ns", "/gripper_1")
+        self.declare_parameter("gripper_ns", "/gripper")
+        self.declare_parameter("gripper_side", "left")
         gripper_ns = self.get_parameter("gripper_ns").value
+        side = self.get_parameter("gripper_side").value
+
+        topic_prefix = f"{gripper_ns}/{side}"
 
         self._cmd_pub = self.create_publisher(
-            Float32MultiArray, f"{gripper_ns}/command", 10
+            Float32MultiArray, f"{topic_prefix}/command", 10
         )
         self._status_sub = self.create_subscription(
-            String, f"{gripper_ns}/status", self._status_callback, 10
+            String, f"{topic_prefix}/status", self._status_callback, 10
         )
         self._state_sub = self.create_subscription(
-            Float32MultiArray, f"{gripper_ns}/state", self._state_callback, 10
+            Float32MultiArray, f"{topic_prefix}/state", self._state_callback, 10
         )
 
         self._current_status = "UNKNOWN"
         self._current_state = [0.0, 0.0]
 
         self.get_logger().info(
-            f"夹爪开合 Demo 启动 (目标命名空间: {gripper_ns})"
+            f"夹爪开合 Demo 启动 (目标: {topic_prefix})"
         )
 
     def _status_callback(self, msg: String):

@@ -7,11 +7,17 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     # 从环境变量或默认值获取参数
-    ns = os.getenv("GRIPPER_NS", "gripper_1")
-    port = os.getenv("GRIPPER_PORT", "/dev/ttyUSB0")
-    servo_id = os.getenv("GRIPPER_SERVO_ID", "21")
-    servo_min = os.getenv("GRIPPER_SERVO_MIN", "2048")
-    servo_max = os.getenv("GRIPPER_SERVO_MAX", "3998")
+    ns = os.getenv("GRIPPER_NS", "gripper")
+
+    left_port = os.getenv("GRIPPER_LEFT_PORT", "/dev/ttyUSB0")
+    left_id = os.getenv("GRIPPER_LEFT_ID", "21")
+    left_min = os.getenv("GRIPPER_LEFT_MIN", "1981")
+    left_max = os.getenv("GRIPPER_LEFT_MAX", "3069")
+
+    right_port = os.getenv("GRIPPER_RIGHT_PORT", "/dev/ttyUSB1")
+    right_id = os.getenv("GRIPPER_RIGHT_ID", "22")
+    right_min = os.getenv("GRIPPER_RIGHT_MIN", "1981")
+    right_max = os.getenv("GRIPPER_RIGHT_MAX", "3069")
 
     gripper_node = Node(
         package="xtrainer_gripper",
@@ -20,10 +26,14 @@ def generate_launch_description():
         namespace=ns,
         output="screen",
         parameters=[
-            {"port": port},
-            {"servo_id": int(servo_id)},
-            {"servo_min_pos": int(servo_min)},
-            {"servo_max_pos": int(servo_max)},
+            {"left_port": left_port},
+            {"left_servo_id": int(left_id)},
+            {"left_servo_min_pos": int(left_min)},
+            {"left_servo_max_pos": int(left_max)},
+            {"right_port": right_port},
+            {"right_servo_id": int(right_id)},
+            {"right_servo_min_pos": int(right_min)},
+            {"right_servo_max_pos": int(right_max)},
             {"publish_rate": 20.0},
             {"torque_limit": 300},
         ],

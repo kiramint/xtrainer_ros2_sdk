@@ -19,35 +19,23 @@ def generate_launch_description():
     )
 
     # ================================================================
-    # 夹爪节点 (每个夹爪用独立命名空间区分 topic)
+    # 夹爪节点 (单节点管理双臂，话题: /gripper/left/xxx, /gripper/right/xxx)
     # ================================================================
-    gripper_1 = Node(
+    gripper_node = Node(
         package="xtrainer_gripper",
         executable="gripper_node",
-        name="gripper_1",
-        namespace="gripper_1",
+        name="gripper",
+        namespace="gripper",
         output="screen",
         parameters=[
-            {"port": "/dev/ttyUSB0"},
-            {"servo_id": 21},
-            {"servo_min_pos": 2048},
-            {"servo_max_pos": 3998},
-            {"publish_rate": 20.0},
-            {"torque_limit": 300},
-        ],
-    )
-
-    gripper_2 = Node(
-        package="xtrainer_gripper",
-        executable="gripper_node",
-        name="gripper_2",
-        namespace="gripper_2",
-        output="screen",
-        parameters=[
-            {"port": "/dev/ttyUSB1"},
-            {"servo_id": 22},
-            {"servo_min_pos": 2048},
-            {"servo_max_pos": 3998},
+            {"left_port": "/dev/ttyUSB0"},
+            {"left_servo_id": 21},
+            {"left_servo_min_pos": 2500},
+            {"left_servo_max_pos": 3800},
+            {"right_port": "/dev/ttyUSB1"},
+            {"right_servo_id": 22},
+            {"right_servo_min_pos": 2500},
+            {"right_servo_max_pos": 3800},
             {"publish_rate": 20.0},
             {"torque_limit": 300},
         ],
@@ -237,8 +225,7 @@ def generate_launch_description():
 
     ld.extend([
             xtrainer_driver,
-            gripper_1,
-            gripper_2,
+            gripper_node,
             realsense_camera_top,
             # realsense_camera_left,
             # realsense_camera_right,

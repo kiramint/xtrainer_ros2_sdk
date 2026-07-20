@@ -8,16 +8,19 @@
   如果物体滑脱（负载下降），自动补夹。
 
 用法:
-  # 默认 /gripper_1 命名空间
+  # 默认左夹爪
   ros2 run xtrainer_gripper gripper_constant_force_demo
 
+  # 指定右夹爪
+  ros2 run xtrainer_gripper gripper_constant_force_demo --ros-args -p gripper_side:=right
+
   # 指定命名空间
-  ros2 run xtrainer_gripper gripper_constant_force_demo --ros-args -p gripper_ns:=/gripper_2
+  ros2 run xtrainer_gripper gripper_constant_force_demo --ros-args -p gripper_ns:=/gripper
 
 工作原理:
   1. 夹爪全开
   2. 缓慢闭合 (speed≈0.3)
-  3. 实时监控 ~/state 中的 load 值
+  3. 实时监控 ~/left/state 中的 load 值
   4. 当 load > force_threshold 时 → 停止闭合 (物体已夹住)
   5. 保持监控：若 load 下降 (物体滑脱) → 自动补夹半步
   6. 用户 Ctrl+C 退出，夹爪自动张开释放
@@ -54,17 +57,21 @@ class ConstantForceDemo(Node):
     def __init__(self):
         super().__init__("constant_force_demo")
 
-        self.declare_parameter("gripper_ns", "/gripper_1")
+        self.declare_parameter("gripper_ns", "/gripper")
+        self.declare_parameter("gripper_side", "left")
         gripper_ns = self.get_parameter("gripper_ns").value
+        side = self.get_parameter("gripper_side").value
+
+        topic_prefix = f"{gripper_ns}/{side}"
 
         self._cmd_pub = self.create_publisher(
-            Float32MultiArray, f"{gripper_ns}/command", 10
+            Float32MultiArray, f"{topic_prefix}/command", 10
         )
         self._status_sub = self.create_subscription(
-            String, f"{gripper_ns}/status", self._status_callback, 10
+            String, f"{topic_prefix}/status", self._status_callback, 10
         )
         self._state_sub = self.create_subscription(
-            Float32MultiArray, f"{gripper_ns}/state", self._state_callback, 10
+            Float32MultiArray, f"{topic_prefix}/state", self._state_callback, 10
         )
 
         self._current_position = 0.0
@@ -74,7 +81,7 @@ class ConstantForceDemo(Node):
         self._held_load = 0.0
 
         self.get_logger().info("=" * 50)
-        self.get_logger().info(f"  恒力夹取 Demo 启动 (目标: {gripper_ns})")
+        self.get_logger().info(f"  恒力夹取 Demo 启动 (目标: {topic_prefix})")
         self.get_logger().info(f"  阈值: {FORCE_THRESHOLD:.2f}  速度: {CLOSE_SPEED:.2f}")
         self.get_logger().info("=" * 50)
 

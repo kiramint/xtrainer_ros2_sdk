@@ -86,10 +86,10 @@ XTrainer 是一个双臂机器人系统，使用 ROS2 进行控制。
 启动以下组件:
 
 1. `xtrainer_driver` (dobot_bringup_v4 → xtrainer.launch.py: 双臂节点 + robot_state_publisher + xtrainer_bridge)
-2. `gripper_1` + `gripper_2` (夹爪节点)
+2. `gripper_node` (单节点管理双臂，话题: /gripper/left/xxx, /gripper/right/xxx)
 3. `realsense_camera_top` + `realsense_camera_left` + `realsense_camera_right`
 4. 按需加载 easy_handeye2 标定结果 (publish.launch.py)
-5. 延迟 15s 后自动使能双臂 (enable_arms)
+5. 延迟 3s 后自动使能双臂 (enable_arms)
 
 ### 标定启动文件
 
@@ -276,6 +276,7 @@ int32 res
 ### 驱动解析 (`parseTool.cpp`)
 
 `parserServoJRequest2String` 把请求拼成 TCP 字符串:
+
 - 基本形式: `ServoJ(j1,j2,j3,j4,j5,j6)`
 - 带参数: `ServoJ(j1,j2,j3,j4,j5,j6,t=0.05)`
 - **不做 rad→deg �换**, 调用方必须传度
@@ -524,3 +525,63 @@ ros2 run xtrainer_control disable_arms
 | driver 单线程 spin_some + ServoJ 阻塞 | /joint_states_robot 跌到 30Hz 且不稳 | MultiThreadedExecutor + 独立 callback group |
 | 单 node 内 joint_states + ServoJ 同 executor | 线程竞争 → /joint_states 不稳 | 拆成两个独立 node (进程隔离) |
 | `DeclareBooleanLaunchAction` | ImportError (不存在) | 用 `moveit_configs_utils.launch_utils.DeclareBooleanLaunchArg` |
+
+---
+
+## 本次会话修改记录 (夹爪重构, 2026-07-20)
+
+### `xtrainer_gripper` — 双臂单节点架构
+
+- [x] **根因**: 原有两个独立节点 (每个夹爪一个进程) 冗余且不便统一管理
+- [x] 重构 `gripper_node.py`: 单 `GripperNode` 管理 `_GripperDriver` ×2 (左/右), 各自独立串口和舵机 ID
+- [x] 命名空间 `/gripper`, 话题路径 `/gripper/left/xxx`, `/gripper/right/xxx`
+- [x] 左夹爪: `/dev/ttyUSB0`, 舵机 ID=21；右夹爪: `/dev/ttyUSB1`, 舵机 ID=22
+- [x] 配置: `left_*` / `right_*` 分组参数, 各侧独立 `servo_min_pos`/`servo_max_pos`
+
+### `xtrainer_gripper` — 新增话题
+
+- [x] `~/left/position`, `~/right/position` (Int32) — 电机原始位置读数 (0~4095)
+- [x] `~/left/torque`, `~/right/torque` (Int32) — 运行时设定力矩限制 (0~1000), 订阅后立即写入舵机
+- [x] `~/left/load_raw`, `~/right/load_raw` (Int32) — 原始负载读数 (0~1000)
+
+### `xtrainer_gripper` — 开/关方向修正
+
+- [x] **根因**: `_servo_min`(角度下限)=闭合, `_servo_max`(角度上限)=张开, 但映射写反了
+- [x] `_normalized_to_servo`: 0.0→`_servo_max`(张开), 1.0→`_servo_min`(闭合)
+- [x] `_servo_to_normalized`: 读到大概率→接近 0.0(OPENED), 读到小值→接近 1.0(CLOSED)
+
+### `xtrainer_gripper` — 移除 sudo 依赖
+
+- [x] `_set_latency_timer()`: 改为直接写入 sysfs, PermissionError 静默跳过
+- [x] 新增 `setup_udev.sh`: 一键安装 udev 规则 `SUBSYSTEM=="usb-serial", DRIVER=="ftdi_sio", ATTR{latency_timer}="1"`
+
+### `xtrainer_gripper` — 新增控制类与一键脚本
+
+- [x] 新增 `gripper_control.py`: `GripperController` 类, 通过 topic 控制夹爪
+  - `open(side)` / `close(side)` / `open_both()` / `close_both()` — 运动控制
+  - `set_torque(side, limit)` / `set_torque_both(limit)` — 力矩控制
+  - `read_position(side)` / `read_load(side)` / `read_raw_position(side)` / `read_raw_load(side)` / `read_status(side)` — 非阻塞读取
+  - `wait_status(side, target, timeout)` — 阻塞等待到位
+- [x] 新增 `gripper_open_arms.py` / `gripper_close_arms.py` — 一键开关脚本
+- [x] 新增 `launch/gripper_open.launch.py` / `launch/gripper_close.launch.py`
+
+### `xtrainer_gripper` — 其他
+
+- [x] 行程限位改为 launch 配置文件方式, 不再从舵机 EPROM 读取
+- [x] 更新 `start.launch.py`: 合并两个独立 Node 为单一 `gripper_node`
+- [x] 更新 `gripper.launch.py`: 适配 `left_*` / `right_*` 参数结构与环境变量
+- [x] 更新 `setup.py`: 注册新入口点和 launch 文件
+- [x] 更新 Demo 脚本: 新增 `gripper_side` 参数适配新话题结构
+- [x] 更新 `README.md`: 反映双臂单节点架构和 GripperController API
+
+### 夹爪话题完整清单
+
+| 话题 | 类型 | 方向 | 说明 |
+|------|------|------|------|
+| `/gripper/left/command` | Float32MultiArray | 订阅 | `[position(0-1), speed(0-1)]` |
+| `/gripper/left/state` | Float32MultiArray | 发布 | `[position(0-1), load(0-1)]` |
+| `/gripper/left/status` | String | 发布 | OPENED/CLOSED/MOVING/ERROR |
+| `/gripper/left/position` | Int32 | 发布 | 原始位置 0~4095 |
+| `/gripper/left/torque` | Int32 | 订阅 | 运行时力矩限制 0~1000 |
+| `/gripper/left/load_raw` | Int32 | 发布 | 原始负载 0~1000 |
+| `/gripper/right/*` | (同上) | | |
