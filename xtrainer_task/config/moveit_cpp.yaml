@@ -1,0 +1,6 @@
+# moveit_cpp configuration for xtrainer_task
+#
+# The planning_pipelines key must be a dict (not a plain list),
+# otherwise moveit_cpp::loadPlanningPipelines() fails.
+planning_pipelines:
+  pipeline_names: ["ompl", "pilz_industrial_motion_planner", "stomp", "chomp"]

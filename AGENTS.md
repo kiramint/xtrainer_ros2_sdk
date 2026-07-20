@@ -6,7 +6,7 @@
 
 ## 项目概述
 
-XTrainer 是一个双臂机器人系统，使用 ROS2 进行控制。
+XTrainer 是一个双臂机器人系统，使用 ROS2 Jazzy + Ubuntu24.04 进行控制。
 
 ### 硬件配置
 
