@@ -108,13 +108,13 @@ easy_handeye2 标定参数:
 - `name`: 标定唯一名称，对应 .calib 文件名
 - `robot_base_frame`: `base_link`
 - `robot_effector_frame`: 机械臂末端 link
-- `tracking_base_frame`: `camera_base`
-- `tracking_marker_frame`: `camera_marker`
+- `tracking_base_frame`: 相机物理 link (如 `camera_top_link`, `camera_left_link`, `camera_right_link`)
+- `tracking_marker_frame`: aruco marker frame (如 `aruco_marker_top`, `aruco_marker_left`, `aruco_marker_right`)
 
 ### ArUco 标定板参数
 
 - marker_id: 99
-- marker_size: 0.10 (10cm)
+- marker_size: 0.078 (7.8cm)
 - corner_refinement: LINES
 
 ---
@@ -125,7 +125,7 @@ easy_handeye2 标定参数:
 
 - 各相机 `serial_no`: 当前为空字符串 `""`
 - 夹爪 `port`: `/dev/ttyUSB0`、`/dev/ttyUSB1`
-- 相机 `camera_frame`: 当前为 `"rgb_camera_link"`，需要与 realsense 实际发布的 TF frame 名称对齐
+- 各相机 `camera_frame`: 标定使用物理 link (`camera_top_link`, `camera_left_link`, `camera_right_link`), aruco_ros 的 `reference_frame` 与 `camera_frame` 均设为该 link, easy_handeye2 的 `tracking_base_frame` 也使用该 link (方案A: 标出机械安装关系, 相机内部 TF 由 RealSense 驱动发布)
 
 ---
 

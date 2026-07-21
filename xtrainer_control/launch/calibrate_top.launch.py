@@ -6,12 +6,12 @@ from launch.actions import IncludeLaunchDescription
 from launch_ros.actions import Node
 
 aruco_single_params = {
-        "image_is_rectified": False,
+        "image_is_rectified": True,
         "marker_id": 99,
-        "marker_size": 0.10,
-        "reference_frame": "camera_base",
-        "camera_frame": "rgb_camera_link",
-        "marker_frame": "camera_marker",
+        "marker_size": 0.078,
+        "reference_frame": "camera_top_link",
+        "camera_frame": "camera_top_link",
+        "marker_frame": "aruco_marker_top",
         "corner_refinement": "LINES",
     }
 aruco_camera_info_topic_name = "/camera/camera_top/color/camera_info"
@@ -33,7 +33,7 @@ def generate_launch_description():
         ),
         launch_arguments={
             # --- SN 绑定 ---
-            "serial_no": "",
+            "serial_no": "'412622270884'",
             # --- 相机命名与命名空间 ---
             "camera_name": "camera_top",
             "camera_namespace": "camera",
@@ -62,16 +62,16 @@ def generate_launch_description():
     # ================================================================
     # XTrainer 机械臂驱动
     # ================================================================
-    xtrainer_driver = IncludeLaunchDescription(
-        os.path.join(
-            get_package_share_directory("dobot_bringup_v4"),
-            "launch",
-            "xtrainer.launch.py",
-        )
-    )
+    # xtrainer_driver = IncludeLaunchDescription(
+    #     os.path.join(
+    #         get_package_share_directory("dobot_bringup_v4"),
+    #         "launch",
+    #         "xtrainer.launch.py",
+    #     )
+    # )
 
     return LaunchDescription([
-        xtrainer_driver,
+        # xtrainer_driver,
         realsense_camera_top,
         Node(
             package="aruco_ros",
@@ -90,9 +90,8 @@ def generate_launch_description():
                 "name": "top_cam_cal",
                 "robot_base_frame": "base_link",
                 "robot_effector_frame": "L1_6",
-                "tracking_base_frame": "camera_base",
-                "tracking_marker_frame": "camera_marker",
+                "tracking_base_frame": "camera_top_link",
+                "tracking_marker_frame": "aruco_marker_top",
             }.items(),
         ),
     ])
-

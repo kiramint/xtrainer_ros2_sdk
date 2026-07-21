@@ -22,10 +22,12 @@ import tf2_geometry_msgs
 import tf2_ros
 from geometry_msgs.msg import PointStamped, Pose
 from moveit.planning import MoveItPy
+from scipy.spatial.transform import Rotation
 from sensor_msgs.msg import CameraInfo, Image
 
+from xtrainer_gripper.gripper_control import GripperController
 from xtrainer_task.dino_wrapper import DinoWrapper
-from xtrainer_task.robot_move import RobotMover
+from xtrainer_task.robot_move import Planner, RobotMover
 
 _COLOR_ENCODINGS = {"bgr8", "rgb8"}
 _DEPTH_ENCODINGS = {"16UC1", "mono16"}
@@ -60,6 +62,9 @@ class XTrainerTask(rclpy.Node):
         self.dino = DinoWrapper(
             device='cuda', box_threshold=0.35, text_threshold=0.25,
         )
+
+        # 夹爪
+        self.gripper = GripperController()
 
         # ── 彩色图缓存 (camera_name → latest BGR np.ndarray) ──
         self._color_frames: Dict[str, np.ndarray] = {}
@@ -111,26 +116,124 @@ class XTrainerTask(rclpy.Node):
     # ------------------------------------------------------------------
 
     def launch(self):
+        """
+        Step 1: Approach
+        """
         image_top = self.get_latest_color("camera_top")
-        depth_top = self.get_latest_depth("camera_top")
         result = self.dino.detect(image_top,"bottle")
         
         mid_x = (result.boxes[0]+result.boxes[3])/2
         mid_y = (result.boxes[1]+result.boxes[4])/2
         
-        mid_depth = self.get_depth_at_pixel("camera_top",mid_x,mid_y)
         mid_coordinate = self.pixel_to_base_link("camera_top",mid_x,mid_y)
 
-        pose1 = Pose()
-        pose1.position.x = mid_coordinate[0]
-        pose1.position.y = mid_coordinate[1]
-        pose1.position.z = mid_coordinate[2]
-        pose1.orientation.x = 0.0
-        pose1.orientation.y = 0.0
-        pose1.orientation.z = 0.0
-        pose1.orientation.w = 1.0
+        rot = Rotation.from_euler('xyz',[0,0,np.radians(-90)])
 
+        # 10cm away from bottle
+        pose_approach = Pose()
+        pose_approach.position.x = mid_coordinate[0] - 0.1
+        pose_approach.position.y = mid_coordinate[1]
+        pose_approach.position.z = mid_coordinate[2]
+        pose_approach.orientation.x = rot[0]
+        pose_approach.orientation.y = rot[1]
+        pose_approach.orientation.z = rot[2]
+        pose_approach.orientation.w = rot[3]
 
+        # move arm
+        self.mover.plan_pose('Arm1',pose_approach,'L1_gripper_tcp',Planner.ompl)
+
+        """
+        Step 2: Grasp bottle
+        """
+        image_left = self.get_latest_color("camera_left")
+        result = self.dino.detect(image_left,"bottle")
+
+        mid_x = (result.boxes[0]+result.boxes[3])/2
+        mid_y = (result.boxes[1]+result.boxes[4])/2
+        
+        mid_coordinate = self.pixel_to_base_link("camera_left",mid_x,mid_y)
+        
+        rot = Rotation.from_euler('xyz',[0,0,np.radians(-90)])
+
+        # 10cm away from bottle
+        pose_grasp = Pose()
+        pose_grasp.position.x = mid_coordinate[0]
+        pose_grasp.position.y = mid_coordinate[1]
+        pose_grasp.position.z = mid_coordinate[2]
+        pose_grasp.orientation.x = rot[0]
+        pose_grasp.orientation.y = rot[1]
+        pose_grasp.orientation.z = rot[2]
+        pose_grasp.orientation.w = rot[3]
+
+        # move arm
+        self.mover.plan_pose('Arm1',pose_approach,'L1_gripper_tcp',Planner.pilz_ptp)
+
+        # Grasp bottle
+        self.gripper.set_torque(100) # TODO
+        self.gripper.close("left", speed=1.0)
+
+        # return # for test
+        """
+        Step 3: Grasp bottle cap
+        """
+        image_top = self.get_latest_color("camera_top")
+        result = self.dino.detect(image_top,"bottle cap")
+        
+        mid_x = (result.boxes[0]+result.boxes[3])/2
+        mid_y = (result.boxes[1]+result.boxes[4])/2
+        
+        mid_coordinate = self.pixel_to_base_link("camera_top",mid_x,mid_y)
+
+        rot = Rotation.from_euler('xyz',[0,0,np.radians(-90)])
+
+        # 10cm away from bottle
+        pose_approach = Pose()
+        pose_approach.position.x = mid_coordinate[0] + 0.1
+        pose_approach.position.y = mid_coordinate[1]
+        pose_approach.position.z = mid_coordinate[2]
+        pose_approach.orientation.x = rot[0]
+        pose_approach.orientation.y = rot[1]
+        pose_approach.orientation.z = rot[2]
+        pose_approach.orientation.w = rot[3]
+
+        # move arm
+        self.mover.plan_pose('Arm2',pose_approach,'L1_gripper_tcp',Planner.ompl)
+
+        """
+        Step 4: Grasp bottle cap
+        """
+        image_left = self.get_latest_color("camera_right")
+        result = self.dino.detect(image_left,"white bottle cap")
+
+        mid_x = (result.boxes[0]+result.boxes[3])/2
+        mid_y = (result.boxes[1]+result.boxes[4])/2
+        
+        mid_coordinate = self.pixel_to_base_link("camera_right",mid_x,mid_y)
+        
+        rot = Rotation.from_euler('xyz',[0,0,np.radians(-90)])
+
+        # 10cm away from bottle
+        pose_grasp = Pose()
+        pose_grasp.position.x = mid_coordinate[0]
+        pose_grasp.position.y = mid_coordinate[1]
+        pose_grasp.position.z = mid_coordinate[2]
+        pose_grasp.orientation.x = rot[0]
+        pose_grasp.orientation.y = rot[1]
+        pose_grasp.orientation.z = rot[2]
+        pose_grasp.orientation.w = rot[3]
+
+        # move arm
+        self.mover.plan_pose('Arm2',pose_approach,'L1_gripper_tcp',Planner.pilz_ptp)
+
+        # Grasp bottle
+        self.gripper.set_torque(100) # TODO
+        self.gripper.close("right", speed=1.0)
+
+        """
+        Step 5: Open bottle cap
+        """
+
+        # TODO:
 
 
     # ------------------------------------------------------------------
