@@ -246,12 +246,12 @@
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_1_visuals_J1_1_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
-        <visual>
+        <collision>
             <origin xyz="0. 0. 0." rpy="3.1415927 0. 3.1415927"/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_1_collisions_J1_1_mesh.obj" scale="1. 1. 1."/>
             </geometry>
-        </visual>
+        </collision>
     </link>
     <link name="L1_2">
         <inertial>
@@ -265,12 +265,12 @@
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_2_visuals_J1_2_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
-        <visual>
+        <collision>
             <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_2_collisions_J1_2_mesh.obj" scale="1. 1. 1."/>
             </geometry>
-        </visual>
+        </collision>
     </link>
     <link name="L1_3">
         <inertial>
@@ -284,12 +284,12 @@
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_3_visuals_J1_3_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
-        <visual>
+        <collision>
             <origin xyz="0. 0. -0." rpy="-3.1415925 -0. 3.1415925"/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_3_collisions_J1_3_mesh.obj" scale="1. 1. 1."/>
             </geometry>
-        </visual>
+        </collision>
     </link>
     <link name="L1_4">
         <inertial>
@@ -303,12 +303,12 @@
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_4_visuals_J1_4_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
-        <visual>
+        <collision>
             <origin xyz="-0. 0. 0." rpy="0. 0. 0."/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_4_collisions_J1_4_mesh.obj" scale="1. 1. 1."/>
             </geometry>
-        </visual>
+        </collision>
     </link>
     <link name="L1_5">
         <inertial>
@@ -322,12 +322,12 @@
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_5_visuals_J1_5_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
-        <visual>
+        <collision>
             <origin xyz="0. 0. 0." rpy="-0. 0. -0."/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_5_collisions_J1_5_mesh.obj" scale="1. 1. 1."/>
             </geometry>
-        </visual>
+        </collision>
     </link>
     <link name="L1_6">
         <inertial>
@@ -339,12 +339,6 @@
             <origin xyz="-0. 0. -0." rpy="-0. 0. 0."/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_6_visuals_J1_6_mesh.obj" scale="1. 1. 1."/>
-            </geometry>
-        </visual>
-        <visual>
-            <origin xyz="-0. 0. -0." rpy="-0. 0. 0."/>
-            <geometry>
-                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_6_collisions_J1_6_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
         <collision>
@@ -366,12 +360,6 @@
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_7_visuals_J1_7_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
-        <visual>
-            <origin xyz="-0. 0. -0." rpy="-3.1415927 0. -3.1415927"/>
-            <geometry>
-                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_7_collisions_J1_7_mesh.obj" scale="1. 1. 1."/>
-            </geometry>
-        </visual>
         <collision>
             <origin xyz="-0. 0. -0." rpy="-3.1415927 0. -3.1415927"/>
             <geometry>
@@ -389,12 +377,6 @@
             <origin xyz="-0. -0. -0." rpy="-0.0000001 0. -0. "/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_8_visuals_J1_8_mesh.obj" scale="1. 1. 1."/>
-            </geometry>
-        </visual>
-        <visual>
-            <origin xyz="-0. -0. -0." rpy="-0.0000001 0. -0. "/>
-            <geometry>
-                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J1_8_collisions_J1_8_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
         <collision>
@@ -416,12 +398,12 @@
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_1_visuals_J2_1_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
-        <visual>
+        <collision>
             <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_1_collisions_J2_1_mesh.obj" scale="1. 1. 1."/>
             </geometry>
-        </visual>
+        </collision>
     </link>
     <link name="L2_2">
         <inertial>
@@ -435,12 +417,12 @@
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_2_visuals_J2_2_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
-        <visual>
+        <collision>
             <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_2_collisions_J2_2_mesh.obj" scale="1. 1. 1."/>
             </geometry>
-        </visual>
+        </collision>
     </link>
     <link name="L2_3">
         <inertial>
@@ -454,12 +436,12 @@
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_3_visuals_J2_3_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
-        <visual>
+        <collision>
             <origin xyz="0. -0. 0." rpy="0. 0. 0."/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_3_collisions_J2_3_mesh.obj" scale="1. 1. 1."/>
             </geometry>
-        </visual>
+        </collision>
     </link>
     <link name="L2_4">
         <inertial>
@@ -473,12 +455,12 @@
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_4_visuals_J2_4_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
-        <visual>
+        <collision>
             <origin xyz="0. -0. 0." rpy="0.0000001 0. 0. "/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_4_collisions_J2_4_mesh.obj" scale="1. 1. 1."/>
             </geometry>
-        </visual>
+        </collision>
     </link>
     <link name="L2_5">
         <inertial>
@@ -492,12 +474,12 @@
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_5_visuals_J2_5_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
-        <visual>
+        <collision>
             <origin xyz="0. -0. -0." rpy="3.1415927 -0.0000001 3.1415925"/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_5_collisions_J2_5_mesh.obj" scale="1. 1. 1."/>
             </geometry>
-        </visual>
+        </collision>
     </link>
     <link name="L2_6">
         <inertial>
@@ -509,12 +491,6 @@
             <origin xyz="-0. 0. 0." rpy="-0.0000001 -0. 0.0000001"/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_6_visuals_J2_6_mesh.obj" scale="1. 1. 1."/>
-            </geometry>
-        </visual>
-        <visual>
-            <origin xyz="-0. 0. 0." rpy="-0.0000001 -0. 0.0000001"/>
-            <geometry>
-                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_6_collisions_J2_6_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
         <collision>
@@ -536,12 +512,6 @@
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_7_visuals_J2_7_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
-        <visual>
-            <origin xyz="-0. -0. 0." rpy="-3.1415925 -0. 3.1415925"/>
-            <geometry>
-                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_7_collisions_J2_7_mesh.obj" scale="1. 1. 1."/>
-            </geometry>
-        </visual>
         <collision>
             <origin xyz="-0. -0. 0." rpy="-3.1415925 -0. 3.1415925"/>
             <geometry>
@@ -559,12 +529,6 @@
             <origin xyz="-0. 0. -0." rpy="0.0000001 -0. 0. "/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_8_visuals_J2_8_mesh.obj" scale="1. 1. 1."/>
-            </geometry>
-        </visual>
-        <visual>
-            <origin xyz="-0. 0. -0." rpy="0.0000001 -0. 0. "/>
-            <geometry>
-                <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J2_8_collisions_J2_8_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
         <collision>
@@ -586,12 +550,12 @@
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J3_1_visuals_J3_1_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
-        <visual>
+        <collision>
             <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J3_1_collisions_J3_1_mesh.obj" scale="1. 1. 1."/>
             </geometry>
-        </visual>
+        </collision>
     </link>
     <link name="L3_2">
         <inertial>
@@ -605,12 +569,12 @@
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J3_2_visuals_J3_2_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
-        <visual>
+        <collision>
             <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J3_2_collisions_J3_2_mesh.obj" scale="1. 1. 1."/>
             </geometry>
-        </visual>
+        </collision>
     </link>
     <link name="L3_3">
         <inertial>
@@ -624,12 +588,12 @@
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J3_3_visuals_J3_3_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
-        <visual>
+        <collision>
             <origin xyz="-0. -0. 0." rpy="-3.1415925 0. 3.1415927"/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J3_3_collisions_J3_3_mesh.obj" scale="1. 1. 1."/>
             </geometry>
-        </visual>
+        </collision>
     </link>
     <link name="L3_4">
         <inertial>
@@ -643,12 +607,12 @@
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J3_4_visuals_J3_4_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
-        <visual>
+        <collision>
             <origin xyz="0. 0. 0." rpy="-3.1415925 0. 3.1415927"/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J3_4_collisions_J3_4_mesh.obj" scale="1. 1. 1."/>
             </geometry>
-        </visual>
+        </collision>
     </link>
     <link name="L3_5">
         <inertial>
@@ -662,12 +626,12 @@
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J3_5_visuals_J3_5_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
-        <visual>
+        <collision>
             <origin xyz="-0. 0. -0." rpy="-3.1415927 -0. 3.1415925"/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J3_5_collisions_J3_5_mesh.obj" scale="1. 1. 1."/>
             </geometry>
-        </visual>
+        </collision>
     </link>
     <link name="L3_6">
         <inertial>
@@ -681,12 +645,12 @@
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J3_6_visuals_J3_6_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
-        <visual>
+        <collision>
             <origin xyz="0. 0. 0." rpy="-3.1415925 -0.0000001 3.1415927"/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J3_6_collisions_J3_6_mesh.obj" scale="1. 1. 1."/>
             </geometry>
-        </visual>
+        </collision>
     </link>
     <link name="L4_1">
         <inertial>
@@ -700,12 +664,12 @@
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J4_1_visuals_J4_1_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
-        <visual>
+        <collision>
             <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J4_1_collisions_J4_1_mesh.obj" scale="1. 1. 1."/>
             </geometry>
-        </visual>
+        </collision>
     </link>
     <link name="L4_2">
         <inertial>
@@ -719,12 +683,12 @@
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J4_2_visuals_J4_2_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
-        <visual>
+        <collision>
             <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J4_2_collisions_J4_2_mesh.obj" scale="1. 1. 1."/>
             </geometry>
-        </visual>
+        </collision>
     </link>
     <link name="L4_3">
         <inertial>
@@ -738,12 +702,12 @@
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J4_3_visuals_J4_3_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
-        <visual>
+        <collision>
             <origin xyz="0. -0. 0." rpy="-3.1415925 0. 3.1415927"/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J4_3_collisions_J4_3_mesh.obj" scale="1. 1. 1."/>
             </geometry>
-        </visual>
+        </collision>
     </link>
     <link name="L4_4">
         <inertial>
@@ -757,12 +721,12 @@
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J4_4_visuals_J4_4_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
-        <visual>
+        <collision>
             <origin xyz="-0. -0. 0." rpy="-3.1415925 0. 3.1415927"/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J4_4_collisions_J4_4_mesh.obj" scale="1. 1. 1."/>
             </geometry>
-        </visual>
+        </collision>
     </link>
     <link name="L4_5">
         <inertial>
@@ -776,12 +740,12 @@
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J4_5_visuals_J4_5_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
-        <visual>
+        <collision>
             <origin xyz="-0. 0. 0." rpy="3.1415927 -0. -3.1415927"/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J4_5_collisions_J4_5_mesh.obj" scale="1. 1. 1."/>
             </geometry>
-        </visual>
+        </collision>
     </link>
     <link name="L4_6">
         <inertial>
@@ -795,12 +759,12 @@
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J4_6_visuals_J4_6_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
-        <visual>
+        <collision>
             <origin xyz="0. 0. 0." rpy="-3.1415927 0. -3.1415925"/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_J4_6_collisions_J4_6_mesh.obj" scale="1. 1. 1."/>
             </geometry>
-        </visual>
+        </collision>
     </link>
     <link name="base_link">
         <inertial>
@@ -814,11 +778,11 @@
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_base_link_visuals_base_link_mesh.obj" scale="1. 1. 1."/>
             </geometry>
         </visual>
-        <visual>
+        <collision>
             <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
             <geometry>
                 <mesh filename="package://xtrainer_description/meshes/x_trainer_asm_0226_SLDASM_base_link_collisions_base_link_mesh.obj" scale="1. 1. 1."/>
             </geometry>
-        </visual>
+        </collision>
     </link>
 </robot>

@@ -69,6 +69,11 @@ def generate_launch_description():
             "align_depth.enable": "true",
             # --- 深度着色 (将深度图转为彩色便于可视化) ---
             "colorizer.enable": "true",
+            # --- 彩色流分辨率 ---
+            "rgb_camera.color_profile": "1280x720x15",
+            "depth_module.depth_profile": "1280x720x15",
+            "depth_module.color_profile": "1280x720x15",
+            "depth_module.infra_profile": "1280x720x15",
             # --- TF ---
             "publish_tf": "true",
             "tf_publish_rate": "0.0",
@@ -103,6 +108,11 @@ def generate_launch_description():
             "align_depth.enable": "true",
             # --- 深度着色 (将深度图转为彩色便于可视化) ---
             "colorizer.enable": "true",
+            # --- 彩色流分辨率 ---
+            # "rgb_camera.color_profile": "1280x720x15",
+            # "depth_module.depth_profile": "1280x720x15",
+            # "depth_module.color_profile": "1280x720x15",
+            # "depth_module.infra_profile": "1280x720x15",
             # --- TF ---
             "publish_tf": "true",
             "tf_publish_rate": "0.0",
@@ -137,6 +147,11 @@ def generate_launch_description():
             "align_depth.enable": "true",
             # --- 深度着色 (将深度图转为彩色便于可视化) ---
             "colorizer.enable": "true",
+             # --- 彩色流分辨率 ---
+            # "rgb_camera.color_profile": "1280x720x15",
+            # "depth_module.depth_profile": "1280x720x15",
+            # "depth_module.color_profile": "1280x720x15",
+            # "depth_module.infra_profile": "1280x720x15",
             # --- TF ---
             "publish_tf": "true",
             "tf_publish_rate": "0.0",
@@ -227,8 +242,8 @@ def generate_launch_description():
             xtrainer_driver,
             gripper_node,
             realsense_camera_top,
-            # realsense_camera_left,
-            # realsense_camera_right,
+            realsense_camera_left,
+            realsense_camera_right,
             enable_arms,
         ])
 

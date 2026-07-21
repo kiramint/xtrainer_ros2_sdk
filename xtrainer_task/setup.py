@@ -28,6 +28,7 @@ setup(
     entry_points={
         'console_scripts': [
             'start = xtrainer_task.start:main',
+            'dino_test = xtrainer_task.dino_test:main',
         ],
     },
 )
