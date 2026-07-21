@@ -7,12 +7,30 @@ Configs (URDF, SRDF, ompl_planning, kinematics, etc.) must be provided
 via ROS 2 parameters — see launch/start.launch.py for the canonical way.
 """
 
+from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from geometry_msgs.msg import Pose
+from geometry_msgs.msg import Pose, PoseStamped
 from moveit.core.robot_state import RobotState
 from moveit.planning import MoveItPy
+from moveit_msgs.msg import DisplayTrajectory
 from rclpy.node import Node
+
+
+class Planner(Enum):
+    """Supported planner identifiers — pass to any ``plan_*()`` method.
+
+    Each member carries ``planning_pipeline`` and ``planner_id`` to
+    configure ``PlanningComponent`` before calling ``.plan()``.
+    """
+
+    ompl = ('ompl', 'RRTConnectkConfigDefault')
+    pilz_ptp = ('pilz_industrial_motion_planner', 'PTP')
+    pilz_lin = ('pilz_industrial_motion_planner', 'LIN')
+
+    def __init__(self, planning_pipeline: str, planner_id: str):
+        self.planning_pipeline = planning_pipeline
+        self.planner_id = planner_id
 
 
 class RobotMover:
@@ -21,14 +39,29 @@ class RobotMover:
     Uses the Jazzy ``moveit_py`` API (``MoveItPy`` + ``PlanningComponent``)
     for Arm1 (left arm, tip L1_6) and Arm2 (right arm, tip L2_6).
 
+    Planner selection
+    -----------------
+    Every ``plan_*()`` / ``plan_and_execute_*()`` method accepts a
+    ``planner`` keyword argument (default ``'ompl'``):
+
+    | ``planner``    | pipeline                          | planner_id                  |
+    |----------------|-----------------------------------|-----------------------------|
+    | ``'ompl'``     | ompl                              | RRTConnectkConfigDefault    |
+    | ``'pilz_ptp'`` | pilz_industrial_motion_planner    | PTP  (point-to-point/joint) |
+    | ``'pilz_lin'`` | pilz_industrial_motion_planner    | LIN  (linear/Cartesian)     |
+
     Usage (with launch file providing configs)
     ------------------------------------------
         from xtrainer_task.robot_move import RobotMover
         moveit = MoveItPy(node_name='xtrainer_task_moveit')
-        mover = RobotMover(moveit)
+        mover = RobotMover(moveit, node)
 
         pose = mover.get_current_pose('Arm1')
         plan = mover.plan_joints('Arm1', [0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        # Use Pilz PTP:
+        plan = mover.plan_joints('Arm1', [...], planner='pilz_ptp')
+        # Use Pilz LIN for a Cartesian pose:
+        plan = mover.plan_pose('Arm1', target_pose, planner='pilz_lin')
         moveit.execute(plan.trajectory, controllers=[])
     """
 
@@ -36,11 +69,11 @@ class RobotMover:
     _ARM_CONFIG = {
         'Arm1': {
             'group_name': 'Arm1',
-            'tip_link': 'L1_6',
+            'tip_link': 'L1_gripper_tcp',
         },
         'Arm2': {
             'group_name': 'Arm2',
-            'tip_link': 'L2_6',
+            'tip_link': 'L2_gripper_tcp',
         },
     }
 
@@ -69,6 +102,10 @@ class RobotMover:
 
         self._planning_components: dict[str, Any] = {}
 
+        self._display_pub = node.create_publisher(
+            DisplayTrajectory, '/display_planned_path', 1
+        )
+
         self._logger.info('RobotMover initialised')
 
     # ------------------------------------------------------------------
@@ -91,6 +128,28 @@ class RobotMover:
 
     def _get_tip_link(self, arm: str) -> str:
         return self._ARM_CONFIG[arm]['tip_link']
+
+    @staticmethod
+    def _resolve_planner(planner: 'Planner | str') -> Optional['Planner']:
+        """Validate *planner* and return the :class:`Planner` enum member.
+
+        Returns ``None`` if *planner* is the MoveItPy default
+        (``Planner.ompl``, which means "use whatever ``plan_request_params``
+        says"), so callers can skip overriding.
+        """
+        if isinstance(planner, str):
+            planner = Planner(planner)
+        if planner is Planner.ompl:
+            return None
+        return planner
+
+    def _display_trajectory(self, trajectory):
+        msg = DisplayTrajectory()
+        msg.model_id = self._robot_model.getName()
+        msg.trajectory.append(trajectory)
+        with self._planning_scene_monitor.read_only() as scene:
+            msg.trajectory_start = scene.current_state.toRobotStateMsg()
+        self._display_pub.publish(msg)
 
     # ------------------------------------------------------------------
     # Pose query
@@ -123,11 +182,25 @@ class RobotMover:
         self,
         arm: str,
         joint_values: List[float],
+        *,
+        planner: Planner | str = Planner.ompl,
     ) -> Optional[Any]:
         """Plan a joint-space move for *arm* to *joint_values* (radians).
 
-        Returns the ``PlanResult`` on success (access ``.trajectory``
-        on it), or ``None`` on failure.
+        Parameters
+        ----------
+        arm : str
+            ``'Arm1'`` or ``'Arm2'``.
+        joint_values : list[float]
+            Six joint angles in radians.
+        planner : Planner | str
+            Planner to use (default :attr:`Planner.ompl`).
+            Also accepts string values ``'ompl'``, ``'pilz_ptp'``,
+            ``'pilz_lin'``.
+
+        Returns
+        -------
+        PlanResult or None
         """
         if len(joint_values) != 6:
             raise ValueError(
@@ -137,12 +210,18 @@ class RobotMover:
         pc = self._get_planning_component(arm)
         pc.set_start_state_to_current_state()
 
+        # Apply planner override if non-default
+        planner_cfg = self._resolve_planner(planner)
+        if planner_cfg is not None:
+            pc.planning_pipeline = planner_cfg.planning_pipeline
+            pc.planner_id = planner_cfg.planner_id
+
         robot_state = RobotState(self._robot_model)
         robot_state.set_joint_group_positions(group_name, joint_values)
         pc.set_goal_state(robot_state=robot_state)
 
         self._logger.info(
-            f"[{arm}] planning → "
+            f"[{arm}] planning (planner={planner_cfg.name if planner_cfg else 'ompl'}) → "
             + ", ".join(f"{v:.3f}" for v in joint_values)
         )
         plan_result = pc.plan()
@@ -152,6 +231,7 @@ class RobotMover:
 
         n_pts = len(plan_result.trajectory.joint_trajectory.points)
         self._logger.info(f"[{arm}] plan OK ({n_pts} waypoints)")
+        self._display_trajectory(plan_result.trajectory)
         return plan_result
 
     # ------------------------------------------------------------------
@@ -164,22 +244,49 @@ class RobotMover:
         target_pose: Pose,
         *,
         frame_id: str = 'base_link',
+        planner: Planner | str = Planner.ompl,
     ) -> Optional[Any]:
         """Plan a Cartesian move for *arm* to *target_pose*.
 
         Constructs a PoseStamped, calls ``set_goal_state(pose_stamped_msg=…)``,
         and returns the ``PlanResult`` (or ``None``).
+
+        Parameters
+        ----------
+        arm : str
+            ``'Arm1'`` or ``'Arm2'``.
+        target_pose : Pose
+            Target end-effector pose.
+        frame_id : str
+            Frame in which *target_pose* is expressed (default ``'base_link'``).
+        planner : Planner | str
+            Planner to use (default :attr:`Planner.ompl`).
+            ``Planner.pilz_lin`` is the natural choice for Cartesian
+            linear moves.
+
+        Returns
+        -------
+        PlanResult or None
         """
         tip_link = self._get_tip_link(arm)
         pc = self._get_planning_component(arm)
         pc.set_start_state_to_current_state()
+
+        # Apply planner override if non-default
+        planner_cfg = self._resolve_planner(planner)
+        if planner_cfg is not None:
+            pc.planning_pipeline = planner_cfg.planning_pipeline
+            pc.planner_id = planner_cfg.planner_id
 
         pose_stamped = PoseStamped()
         pose_stamped.header.frame_id = frame_id
         pose_stamped.pose = target_pose
         pc.set_goal_state(pose_stamped_msg=pose_stamped, pose_link=tip_link)
 
-        self._logger.info(f"[{arm}] planning pose target (frame: {frame_id}) …")
+        self._logger.info(
+            f"[{arm}] planning pose target "
+            f"(frame: {frame_id}, planner={planner_cfg.name if planner_cfg else 'ompl'}) …"
+        )
         plan_result = pc.plan()
         if not plan_result:
             self._logger.error(f"[{arm}] planning failed")
@@ -187,6 +294,7 @@ class RobotMover:
 
         n_pts = len(plan_result.trajectory.joint_trajectory.points)
         self._logger.info(f"[{arm}] plan OK ({n_pts} waypoints)")
+        self._display_trajectory(plan_result.trajectory)
         return plan_result
 
     # ------------------------------------------------------------------
@@ -223,9 +331,17 @@ class RobotMover:
         self,
         arm: str,
         joint_values: List[float],
+        *,
+        planner: Planner | str = Planner.ompl,
     ) -> bool:
-        """Plan + execute a joint-space move."""
-        plan_result = self.plan_joints(arm, joint_values)
+        """Plan + execute a joint-space move.
+
+        Parameters
+        ----------
+        planner : Planner | str
+            Forwarded to :meth:`plan_joints`.
+        """
+        plan_result = self.plan_joints(arm, joint_values, planner=planner)
         if plan_result is None:
             return False
         return self.execute(plan_result.trajectory)
@@ -236,9 +352,18 @@ class RobotMover:
         target_pose: Pose,
         *,
         frame_id: str = 'base_link',
+        planner: Planner | str = Planner.ompl,
     ) -> bool:
-        """Plan + execute a Cartesian move."""
-        plan_result = self.plan_pose(arm, target_pose, frame_id=frame_id)
+        """Plan + execute a Cartesian move.
+
+        Parameters
+        ----------
+        planner : Planner | str
+            Forwarded to :meth:`plan_pose`.
+        """
+        plan_result = self.plan_pose(
+            arm, target_pose, frame_id=frame_id, planner=planner
+        )
         if plan_result is None:
             return False
         return self.execute(plan_result.trajectory)

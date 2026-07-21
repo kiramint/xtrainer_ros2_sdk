@@ -13,9 +13,27 @@ import sys
 import time
 
 import rclpy
+from geometry_msgs.msg import Pose
 from moveit.planning import MoveItPy
 
 from xtrainer_task.robot_move import RobotMover
+
+
+def read_current_poses(mover, node):
+    for arm in ('Arm1', 'Arm2'):
+        try:
+            pose = mover.get_current_pose(arm)
+            p = pose.position
+            q = pose.orientation
+            node.get_logger().info(
+                f'[{arm}] current pose — '
+                f'pos: ({p.x:.4f}, {p.y:.4f}, {p.z:.4f}), '
+                f'ori: ({q.x:.4f}, {q.y:.4f}, {q.z:.4f}, {q.w:.4f})'
+            )
+            return pose
+        except Exception as e:
+            node.get_logger().error(f'[{arm}] failed to read pose: {e}')
+            return Pose()
 
 
 def main():
@@ -36,18 +54,7 @@ def main():
     # ------------------------------------------------------------------
     # Read current poses
     # ------------------------------------------------------------------
-    for arm in ('Arm1', 'Arm2'):
-        try:
-            pose = mover.get_current_pose(arm)
-            p = pose.position
-            q = pose.orientation
-            node.get_logger().info(
-                f'[{arm}] current pose — '
-                f'pos: ({p.x:.4f}, {p.y:.4f}, {p.z:.4f}), '
-                f'ori: ({q.x:.4f}, {q.y:.4f}, {q.z:.4f}, {q.w:.4f})'
-            )
-        except Exception as e:
-            node.get_logger().error(f'[{arm}] failed to read pose: {e}')
+    
 
     # ------------------------------------------------------------------
     # Spin to keep MoveIt action clients alive

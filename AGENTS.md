@@ -1,6 +1,6 @@
 # AGENTS.md — XTrainer 项目记忆
 
-> 最后更新: 2026-07-17
+> 最后更新: 2026-07-20
 
 ---
 
@@ -25,6 +25,7 @@ XTrainer 是一个双臂机器人系统，使用 ROS2 Jazzy + Ubuntu24.04 进行
 | `xtrainer_control` | 顶层启动、标定、机械臂状态控制 |
 | `xtrainer_description` | URDF 模型 (x_trainer.urdf) |
 | `xtrainer_gripper` | 串口夹爪控制节点 |
+| `xtrainer_task` | MoveItPy 任务层控制 (Python API, 规划+执行+可视化) |
 | `easy_handeye2` | 手眼标定工具包 |
 
 ---
@@ -43,7 +44,7 @@ XTrainer 是一个双臂机器人系统，使用 ROS2 Jazzy + Ubuntu24.04 进行
 | J1_7, J1_8 | L1_7, L1_8 | 2 个 prismatic 关节 (夹爪手指) |
 | J1_gripper_tcp (fixed) | L1_gripper_tcp | 末端 TCP |
 
-- 末端 effector frame: `L1_6`
+- 末端 effector frame: `L1_gripper_tcp`
 
 ### Arm2 (右臂)
 
@@ -53,7 +54,7 @@ XTrainer 是一个双臂机器人系统，使用 ROS2 Jazzy + Ubuntu24.04 进行
 | J2_7, J2_8 | L2_7, L2_8 | 2 个 prismatic 关节 (夹爪手指) |
 | J2_gripper_tcp (fixed) | L2_gripper_tcp | 末端 TCP |
 
-- 末端 effector frame: `L2_6`
+- 末端 effector frame: `L2_gripper_tcp`
 
 > **注意**: Arm3(J3_*) 和 Arm4(J4_*) 也存在于 URDF 中，但目前未使用。
 
@@ -585,3 +586,60 @@ ros2 run xtrainer_control disable_arms
 | `/gripper/left/torque` | Int32 | 订阅 | 运行时力矩限制 0~1000 |
 | `/gripper/left/load_raw` | Int32 | 发布 | 原始负载 0~1000 |
 | `/gripper/right/*` | (同上) | | |
+
+---
+
+## 本次会话修改记录 (xtrainer_task MoveItPy 可视化, 2026-07-20)
+
+### MoveItPy 架构说明
+
+MoveItPy 是**进程内**规划库，与 move_group 是**平级替代**，不是 client：
+
+| 架构 | 进程 | 需要自己的 config | RViz 支持 |
+|------|------|------|------|
+| move_group + MoveGroupInterface | 独立进程，暴露 MoveGroup Action | move_group 自己加载 | 完整 MotionPlanning 交互面板 |
+| MoveItPy + PlanningComponent | 进程内库 | 需要 moveit_cpp.yaml + MoveItConfigsBuilder | PlanningSceneDisplay + 手动轨迹发布 |
+
+> **注意**: ROS2 Jazzy 的 `moveit_py` 没有提供 `MoveGroupInterface` 的 Python 绑定（只有 C++ 头文件）。如需从 Python 连接 move_group，需用 C++ + pybind11（参考 `/opt/Project/ros_dual_arm/src/start_controller/`）。
+
+### MoveItPy 与 move_group 共存
+
+可以同时运行，**只要不同时执行轨迹**：
+
+- PlanningSceneMonitor 各用不同 topic namespace（`/move_group/` vs `/moveit_cpp/`），不冲突
+- /joint_states 多订阅者正常
+- **唯一冲突点**: 两者的 `TrajectoryExecutionManager` 可能同时向 `/ArmX_controller/follow_joint_trajectory` 发 goal
+
+### `xtrainer_task/config/moveit_cpp.yaml` — 重写
+
+- [x] **根因**: 旧版 `planning_pipelines: {pipeline_names: [...]}` 覆盖了 `MoveItConfigsBuilder.planning_pipelines()` 自动加载的 pipeline 配置（丢失每个 pipeline 的 `planning_plugins` 等参数），导致 MoveItCpp 报 `Failed to load any planning pipelines`
+- [x] `MoveItConfigsBuilder` 生成的 `planning_pipelines` 是 flat list `["ompl", ...]`，但 MoveItCpp 期望 nested dict `{pipeline_names: ["ompl", ...]}`
+- [x] 重写为只含 `planning_scene_monitor_options`、`plan_request_params`、`ompl_rrtc`、`pilz_ptp`，不再覆盖 `planning_pipelines` dict
+
+### `moveit_test/config/sensors_3d.yaml` — 禁用 octomap
+
+- [x] 旧版引用不存在的 kinect topic，导致 `No 3D sensor plugin(s) defined for octomap updates` 错误
+- [x] 改为 `sensors: []`
+
+### `xtrainer_task/config/xtrainer.rviz` — 新增
+
+- [x] 使用 `moveit_rviz_plugin/PlanningScene` 订阅 `/moveit_cpp/monitored_planning_scene` 显示机器人模型
+- [x] 使用 `moveit_rviz_plugin/Trajectory` 订阅 `/display_planned_path` 显示规划轨迹
+- [x] Fixed Frame: `base_link`
+- [x] 注意：这是 `PlanningSceneDisplay`，不是 `MotionPlanningDisplay`（后者需要 move_group）
+
+### `xtrainer_task/launch/start.launch.py` — 增加 RViz
+
+- [x] 新增 `use_rviz` launch arg（默认 true）
+- [x] 新增 RViz 节点，传入 `robot_description` + `robot_description_semantic` 参数
+- [x] `use_rviz:=false` 可禁用
+
+### `xtrainer_task/robot_move.py` — 增加轨迹可视化
+
+- [x] 新增 `_display_pub` 发布 `/display_planned_path` (DisplayTrajectory)
+- [x] 新增 `_display_trajectory()` 方法：规划成功后自动推送轨迹到 RViz 显示
+- [x] `plan_joints()` / `plan_pose()` 规划成功后自动调用 `_display_trajectory()`
+
+### `xtrainer_task/setup.py` — 注册新文件
+
+- [x] 注册 `config/xtrainer.rviz`
