@@ -120,14 +120,22 @@ class XTrainerTask(rclpy.Node):
         Step 1: Approach
         """
         image_top = self.get_latest_color("camera_top")
+        
         result = self.dino.detect(image_top,"bottle")
+
+        if len(result.scores) == 0:
+            self.get_logger().warn("No bottle detected in top camera.")
+            return
+        
+        annotated_image = self.dino.annotate(image_top,result,draw_mask=True)
+        cv2.imshow("Detection Result", result.annotate(image_top, annotated_image))
         
         mid_x = (result.boxes[0]+result.boxes[3])/2
         mid_y = (result.boxes[1]+result.boxes[4])/2
         
         mid_coordinate = self.pixel_to_base_link("camera_top",mid_x,mid_y)
 
-        rot = Rotation.from_euler('xyz',[0,0,np.radians(-90)])
+        rot = Rotation.from_euler('xyz',[0,0,0])
 
         # 10cm away from bottle
         pose_approach = Pose()
@@ -141,6 +149,8 @@ class XTrainerTask(rclpy.Node):
 
         # move arm
         self.mover.plan_pose('Arm1',pose_approach,'L1_gripper_tcp',Planner.ompl)
+
+        return 
 
         """
         Step 2: Grasp bottle

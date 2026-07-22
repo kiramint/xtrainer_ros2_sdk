@@ -38,22 +38,6 @@ from .scservo_sdk import (SMS_STS_PRESENT_LOAD_L, PortHandler,
                           protocol_packet_handler, sms_sts)
 
 
-def _set_latency_timer(port_path: str) -> None:
-    """降低 USB-485 适配器的延迟定时器 (Linux 专用)
-
-    直接尝试写入 sysfs。若无权限则静默跳过——可通过 udev 规则授权：
-      SUBSYSTEM=="usb-serial", DRIVER=="ftdi_sio", ATTR{latency_timer}="1"
-    """
-    name = os.path.basename(port_path)
-    path = f"/sys/bus/usb-serial/devices/{name}/latency_timer"
-    if os.path.exists(path):
-        try:
-            with open(path, "w") as f:
-                f.write("1")
-        except PermissionError:
-            pass
-
-
 class _GripperDriver:
     """单个夹爪的硬件驱动 + 话题"""
 
@@ -81,7 +65,6 @@ class _GripperDriver:
         )
 
         # ── 串口与舵机初始化 ──
-        _set_latency_timer(port)
         self._port_handler = PortHandler(port)
         self._pack_handler = protocol_packet_handler(self._port_handler, 0)
         self._servo = sms_sts(self._port_handler)
@@ -136,11 +119,13 @@ class _GripperDriver:
         position = max(0.0, min(1.0, float(data[0])))
         speed = max(0.0, min(1.0, float(data[1]))) if len(data) >= 2 else 1.0
         self._latest_cmd = (position, speed)
+        self._node.get_logger().info(f"[{self._side}] 接收到命令: position={position:.3f}, speed={speed:.3f}")
 
     def _torque_callback(self, msg: Int32):
         val = max(0, min(1000, msg.data))
         self._set_torque_hw(val)
         self._torque_limit = val
+        self._node.get_logger().info(f"[{self._side}] 力矩限制已更新: {val}")
 
     def _process_command(self):
         if self._latest_cmd is None:
@@ -148,6 +133,7 @@ class _GripperDriver:
         position, speed = self._latest_cmd
         self._latest_cmd = None
         self._move(position, speed)
+        self._node.get_logger().info(f"[{self._side}] 执行命令: position={position:.3f}, speed={speed:.3f}")
 
     # ═══════════════════════════════════════════════════════════════
     #  舵机通信
@@ -250,8 +236,8 @@ class GripperNode(Node):
     """双臂夹爪 ROS2 驱动节点 (管理左右两个夹爪)"""
 
     _SIDE_PARAMS = [
-        ("left",  "/dev/ttyUSB0", 21, 2500, 3800),
-        ("right", "/dev/ttyUSB1", 22, 2500, 3800),
+        ("left",  "/dev/ttyUSB0", 21, 1981, 3069),
+        ("right", "/dev/ttyUSB1", 22, 1981, 3069),
     ]
 
     def __init__(self):
