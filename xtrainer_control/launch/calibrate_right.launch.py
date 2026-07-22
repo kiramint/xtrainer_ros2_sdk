@@ -49,7 +49,7 @@ def generate_launch_description():
             # --- 深度对齐到彩色 (生成对齐的深度图 & 彩色点云) ---
             "align_depth.enable": "true",
             # --- 深度着色 (将深度图转为彩色便于可视化) ---
-            "colorizer.enable": "true",
+            "colorizer.enable": "false",
             # --- TF ---
             "publish_tf": "true",
             "tf_publish_rate": "0.0",

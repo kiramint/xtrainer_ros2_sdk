@@ -83,6 +83,18 @@ Visualization Manager:
       Trail Step Size: 1
       Trajectory Topic: /display_planned_path
       Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: DetectionMarker
+      Namespaces:
+        detection: true
+      Queue Size: 10
+      Topic:
+        Depth: 10
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+        Value: /detection_marker
+      Value: true
     - Class: rviz_default_plugins/TF
       Enabled: false
       Frame Timeout: 15

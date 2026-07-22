@@ -22,8 +22,11 @@ import tf2_geometry_msgs
 import tf2_ros
 from geometry_msgs.msg import PointStamped, Pose
 from moveit.planning import MoveItPy
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
 from scipy.spatial.transform import Rotation
 from sensor_msgs.msg import CameraInfo, Image
+from visualization_msgs.msg import Marker
 
 from xtrainer_gripper.gripper_control import GripperController
 from xtrainer_task.dino_wrapper import DinoWrapper
@@ -46,7 +49,7 @@ _CAMERA_OPTICAL_FRAMES: Dict[str, str] = {
 }
 
 
-class XTrainerTask(rclpy.Node):
+class XTrainerTask(Node):
     def __init__(self):
         super().__init__("xtrainer_task")
 
@@ -64,7 +67,7 @@ class XTrainerTask(rclpy.Node):
         )
 
         # 夹爪
-        self.gripper = GripperController()
+        self.gripper = GripperController(self)
 
         # ── 彩色图缓存 (camera_name → latest BGR np.ndarray) ──
         self._color_frames: Dict[str, np.ndarray] = {}
@@ -108,12 +111,23 @@ class XTrainerTask(rclpy.Node):
             )
             self.get_logger().info(f"Subscribed camera_info: {info_topic}")
 
-            # Launch Task
-            self.create_timer(1.0,self.launch,oneshot=True)
+        # ── 检测点 Marker 发布器 (RViz 可视化) ──
+        qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self._marker_pub = self.create_publisher(Marker, '/detection_marker', qos)
+
+        self.get_logger().info('#################### All module initialized ######################')
+
+        # Launch Task — 1s 后只执行一次 (Jazzy 已移除 oneshot 参数，回调内 cancel 替代)
+        self._launch_timer = self.create_timer(1.0, self._on_launch_timer)
 
     # ------------------------------------------------------------------
     # Controll Task ####################################################
     # ------------------------------------------------------------------
+
+    def _on_launch_timer(self):
+        """One-shot timer callback — cancels timer after first invocation."""
+        self._launch_timer.cancel()
+        self.launch()
 
     def launch(self):
         """
@@ -128,14 +142,23 @@ class XTrainerTask(rclpy.Node):
             return
         
         annotated_image = self.dino.annotate(image_top,result,draw_mask=True)
-        cv2.imshow("Detection Result", result.annotate(image_top, annotated_image))
+        cv2.imshow("Detection Result", annotated_image)
+        cv2.waitKey(1)
         
-        mid_x = (result.boxes[0]+result.boxes[3])/2
-        mid_y = (result.boxes[1]+result.boxes[4])/2
+        mid_x = (result.boxes[0,0]+result.boxes[0,2])/2
+        mid_y = (result.boxes[0,1]+result.boxes[0,3])/2
+
+        self.get_logger().info(f"Mid pixel: ({mid_x}, {mid_y})")
         
         mid_coordinate = self.pixel_to_base_link("camera_top",mid_x,mid_y)
 
-        rot = Rotation.from_euler('xyz',[0,0,0])
+        if mid_coordinate is None:
+            self.get_logger().warn("Failed to compute 3D coordinate of bottle center.")
+            return
+
+        self._publish_detection_marker(mid_coordinate)
+
+        rot = Rotation.from_euler('xyz',[0,0,0]).as_quat()
 
         # 10cm away from bottle
         pose_approach = Pose()
@@ -147,8 +170,12 @@ class XTrainerTask(rclpy.Node):
         pose_approach.orientation.z = rot[2]
         pose_approach.orientation.w = rot[3]
 
+        self.get_logger().info(f"############# Move to pose {pose_approach} ###############")
+
         # move arm
-        self.mover.plan_pose('Arm1',pose_approach,'L1_gripper_tcp',Planner.ompl)
+        traj = self.mover.plan_pose('Arm1',pose_approach,frame_id='L1_gripper_tcp',planner=Planner.ompl)
+
+        self.mover.execute(traj)
 
         return 
 
@@ -247,6 +274,39 @@ class XTrainerTask(rclpy.Node):
 
 
     # ------------------------------------------------------------------
+    # 检测点 Marker 可视化
+    # ------------------------------------------------------------------
+    def _publish_detection_marker(
+        self,
+        coordinate: Tuple[float, float, float],
+    ) -> None:
+        """在 RViz 中发布一个红色小球 Marker 标出检测到的 3D 点。"""
+        marker = Marker()
+        marker.header.frame_id = 'base_link'
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.ns = 'detection'
+        marker.id = 0
+        marker.type = Marker.SPHERE
+        marker.action = Marker.ADD
+        marker.pose.position.x = coordinate[0]
+        marker.pose.position.y = coordinate[1]
+        marker.pose.position.z = coordinate[2]
+        marker.pose.orientation.w = 1.0
+        marker.scale.x = 0.03
+        marker.scale.y = 0.03
+        marker.scale.z = 0.03
+        marker.color.r = 1.0
+        marker.color.g = 0.0
+        marker.color.b = 0.0
+        marker.color.a = 1.0
+        marker.lifetime.sec = 0  # 0 = forever
+        self._marker_pub.publish(marker)
+        self.get_logger().info(
+            f"Detection marker published at "
+            f"({coordinate[0]:.4f}, {coordinate[1]:.4f}, {coordinate[2]:.4f})"
+        )
+
+    # ------------------------------------------------------------------
     # 彩色回调
     # ------------------------------------------------------------------
     def _color_callback(self, camera_name: str, msg: Image) -> None:
@@ -313,6 +373,9 @@ class XTrainerTask(rclpy.Node):
         float or None
             深度值 (mm), 如果无缓 或无有效值则返回 None.
         """
+        u = int(u)
+        v = int(v)
+
         with self._depth_lock:
             depth = self._depth_frames.get(camera_name)
 

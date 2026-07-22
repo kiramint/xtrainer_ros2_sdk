@@ -35,6 +35,16 @@ class XTrainerJointStates(Node):
 
         self._pub = self.create_publisher(JointState, '/joint_states', 10)
 
+        # ── 哑关节 (URDF 中存在但无驱动的关节, 发布 0 值避免 MoveIt 持续 warning) ──
+        self.declare_parameter('dummy_joint_names', [
+            'J1_7', 'J1_8',   # Arm1 夹爪手指
+            'J2_7', 'J2_8',   # Arm2 夹爪手指
+            'J3_1', 'J3_2', 'J3_3', 'J3_4', 'J3_5', 'J3_6',  # Arm3 (未使用)
+            'J4_1', 'J4_2', 'J4_3', 'J4_4', 'J4_5', 'J4_6',  # Arm4 (未使用)
+        ])
+        self._dummy_names = self.get_parameter('dummy_joint_names').value
+        self._dummy_pos = [0.0] * len(self._dummy_names)
+
         self._arm1_sub = self.create_subscription(
             JointState, self.get_parameter('arm1_joint_state_topic').value,
             self._arm1_callback, 10)
@@ -60,10 +70,10 @@ class XTrainerJointStates(Node):
         msg = JointState()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = 'base_link'
-        msg.name = self._all_names
-        msg.position = list(self._arm1_pos) + list(self._arm2_pos)
-        msg.velocity = [0.0] * len(self._all_names)
-        msg.effort = [0.0] * len(self._all_names)
+        msg.name = list(self._all_names) + list(self._dummy_names)
+        msg.position = list(self._arm1_pos) + list(self._arm2_pos) + list(self._dummy_pos)
+        msg.velocity = [0.0] * len(msg.name)
+        msg.effort = [0.0] * len(msg.name)
         self._pub.publish(msg)
 
 

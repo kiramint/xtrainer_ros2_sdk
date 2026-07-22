@@ -218,6 +218,7 @@ URDF effort/velocity 全部设为 `0` (=不限制), 清理 SolidWorks 导出垃�
 | `arm2_joint_names` | ['J2_1'..'J2_6'] | 右臂关节名 |
 | `arm1_joint_state_topic` | /Arm1/joint_states_robot | 左臂状态话题 |
 | `arm2_joint_state_topic` | /Arm2/joint_states_robot | 右臂状态话题 |
+| `dummy_joint_names` | ['J1_7','J1_8','J2_7','J2_8','J3_1'~'J3_6','J4_1'~'J4_6'] | 哑关节 (无驱动, 发布 0 值消除 MoveIt warning) |
 
 #### `xtrainer_controller` (对照官方 dobot_moveit/action_move_server.py)
 
@@ -643,3 +644,30 @@ MoveItPy 是**进程内**规划库，与 move_group 是**平级替代**，不是
 ### `xtrainer_task/setup.py` — 注册新文件
 
 - [x] 注册 `config/xtrainer.rviz`
+
+---
+
+## 本次会话修改记录 (2026-07-22)
+
+### `xtrainer_task/xtrainer_task/start.py` — 修复 float 索引 + 新增检测点 RViz Marker
+
+- [x] **根因**: `launch()` 中 `mid_x`/`mid_y` 为 float, 传入 `get_depth_at_pixel` 后切片索引变成 float → `TypeError`
+- [x] `get_depth_at_pixel` 开头新增 `u=int(u); v=int(v)` 强制类型转换
+- [x] 新增 `_marker_pub` (topic `/detection_marker`) + `_publish_detection_marker()` 方法, 在 `pixel_to_base_link` 成功后发布红色小球 Marker 到 RViz
+- [x] **QoS 踩坑**:
+  - 初版用 `~/detection_marker` → 但 launch 文件覆写 node_name 为 `xtrainer_task_moveit`, topic 错位
+  - 改用绝对 topic `/detection_marker`
+  - Mark 只在启动 1s 后发布一次, RViz 加载需 3-5s → 默认 VOLATILE QoS 丢消息
+  - 改为 `TRANSIENT_LOCAL` durability 解决
+- [x] 新增 `mid_coordinate is None` 空值检查, 避免 crash
+
+### `xtrainer_task/config/xtrainer.rviz` — 新增 DetectionMarker display
+
+- [x] 在 Trajectory display 后新增 `rviz_default_plugins/Marker`, 订阅 `/detection_marker`, namespace `detection`
+
+### `xtrainer_bridge/xtrainer_bridge/xtrainer_joint_states.py` — 新增哑关节发布
+
+- [x] **根因**: URDF 定义了 J1_7/J1_8 (夹爪手指), J3_1~J3_6 (Arm3), J4_1~J4_6 (Arm4) 共 16 个无驱动关节, MoveIt PlanningSceneMonitor 持续报 `Missing JX_X` warning
+- [x] 新增 `dummy_joint_names` 参数 (可通过 launch 覆写), 默认包含全部 16 个哑关节
+- [x] `_publish()` 时将哑关节 (全 0 值) 追加到 `/joint_states` 消息, 消除 MoveIt 警告
+- [x] 更新参数表: 新增 `dummy_joint_names` 行
