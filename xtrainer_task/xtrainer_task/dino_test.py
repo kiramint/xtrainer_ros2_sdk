@@ -70,7 +70,7 @@ class DinoTestNode(Node):
 
         # ── 参数 ──────────────────────────────────────────────
         self.declare_parameter("prompt", "objects.")
-        self.declare_parameter("image_topic", "/camera/camera_top/color/image_raw")
+        self.declare_parameter("image_topic", "/camera/camera_left/color/image_raw")
         self.declare_parameter("box_threshold", 0.35)
         self.declare_parameter("text_threshold", 0.25)
         self.declare_parameter("skip_frames", 0)  # 每隔 N 帧检测一次, 0=每帧

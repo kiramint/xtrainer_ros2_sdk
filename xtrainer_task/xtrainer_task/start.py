@@ -22,9 +22,10 @@ import tf2_geometry_msgs
 import tf2_ros
 from geometry_msgs.msg import PointStamped, Pose
 from moveit.planning import MoveItPy
+from rclpy.callback_groups import (MutuallyExclusiveCallbackGroup,
+                                   ReentrantCallbackGroup)
 from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, QoSProfile
-from scipy.spatial.transform import Rotation
+from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, Image
 from visualization_msgs.msg import Marker
 
@@ -40,13 +41,7 @@ _COLOR_TOPIC_TEMPLATE = "/camera/{name}/color/image_raw"
 _DEPTH_TOPIC_TEMPLATE = "/camera/{name}/aligned_depth_to_color/image_raw"
 
 _CAMERA_NAMES = ("camera_top", "camera_left", "camera_right")
-
-# 相机光学 frame 名称 (TODO: 填入 realsense 实际发布的 TF frame)
-_CAMERA_OPTICAL_FRAMES: Dict[str, str] = {
-    "camera_top": "camera_top_color_frame",      # TODO
-    "camera_left": "camera_left_color_frame",    # TODO
-    "camera_right": "camera_right_color_frame",  # TODO
-}
+_FRESH_FRAME_TIMEOUT_SEC = 10.0
 
 
 class XTrainerTask(Node):
@@ -69,13 +64,9 @@ class XTrainerTask(Node):
         # 夹爪
         self.gripper = GripperController(self)
 
-        # ── 彩色图缓存 (camera_name → latest BGR np.ndarray) ──
-        self._color_frames: Dict[str, np.ndarray] = {}
-        self._color_lock = threading.Lock()
-
-        # ── 深度图缓存 (camera_name → latest aligned depth np.ndarray) ──
-        self._depth_frames: Dict[str, np.ndarray] = {}
-        self._depth_lock = threading.Lock()
+        # ── 各相机最新帧快照 (单锁, 每帧覆盖) ──
+        self._snapshots: Dict[str, dict] = {}
+        self._snapshots_lock = threading.Lock()
 
         # ── 相机内参缓存 (camera_name → CameraInfo) ──
         self._camera_infos: Dict[str, CameraInfo] = {}
@@ -85,30 +76,44 @@ class XTrainerTask(Node):
         self._tf_buffer = tf2_ros.Buffer()
         self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self)
 
+        # launch() 是长时间运行的阻塞任务。它不能与相机回调共用节点默认的
+        # MutuallyExclusiveCallbackGroup，否则 launch() 开始后所有新图像回调都会饿死。
+        self._camera_cb_group = ReentrantCallbackGroup()
+        self._task_cb_group = MutuallyExclusiveCallbackGroup()
+
+        # 保存订阅对象，明确维持其生命周期。
+        self._camera_subscriptions = []
+
         # 为三个相机分别订阅彩色、对齐深度 & 内参话题
         for name in _CAMERA_NAMES:
             color_topic = _COLOR_TOPIC_TEMPLATE.format(name=name)
-            self.create_subscription(
+            color_sub = self.create_subscription(
                 Image, color_topic,
                 lambda msg, cam=name: self._color_callback(cam, msg),
-                10,
+                qos_profile_sensor_data,
+                callback_group=self._camera_cb_group,
             )
+            self._camera_subscriptions.append(color_sub)
             self.get_logger().info(f"Subscribed color: {color_topic}")
 
             depth_topic = _DEPTH_TOPIC_TEMPLATE.format(name=name)
-            self.create_subscription(
+            depth_sub = self.create_subscription(
                 Image, depth_topic,
                 lambda msg, cam=name: self._depth_callback(cam, msg),
-                10,
+                qos_profile_sensor_data,
+                callback_group=self._camera_cb_group,
             )
+            self._camera_subscriptions.append(depth_sub)
             self.get_logger().info(f"Subscribed depth: {depth_topic}")
 
             info_topic = f"/camera/{name}/color/camera_info"
-            self.create_subscription(
+            info_sub = self.create_subscription(
                 CameraInfo, info_topic,
                 lambda msg, cam=name: self._camera_info_callback(cam, msg),
-                10,
+                qos_profile_sensor_data,
+                callback_group=self._camera_cb_group,
             )
+            self._camera_subscriptions.append(info_sub)
             self.get_logger().info(f"Subscribed camera_info: {info_topic}")
 
         # ── 检测点 Marker 发布器 (RViz 可视化) ──
@@ -118,7 +123,9 @@ class XTrainerTask(Node):
         self.get_logger().info('#################### All module initialized ######################')
 
         # Launch Task — 1s 后只执行一次 (Jazzy 已移除 oneshot 参数，回调内 cancel 替代)
-        self._launch_timer = self.create_timer(1.0, self._on_launch_timer)
+        self._launch_timer = self.create_timer(
+            1.0, self._on_launch_timer, callback_group=self._task_cb_group
+        )
 
     # ------------------------------------------------------------------
     # Controll Task ####################################################
@@ -130,152 +137,181 @@ class XTrainerTask(Node):
         self.launch()
 
     def launch(self):
+
+        self.gripper.open_both()
+
         """
         Step 1: Approach
         """
-        image_top = self.get_latest_color("camera_top")
 
-        if image_top is None:
-            self.get_logger().error("No top camera image available.")
+        left_arm_z_axis = 0.0
+
+        # Panning Loop
+        while rclpy.ok():
+            # Capture Loop
+            while rclpy.ok():
+                image_top = self.get_latest_color("camera_top")
+
+                if image_top is None:
+                    self.get_logger().warn(
+                        "Waiting for top camera image...",
+                        throttle_duration_sec=2.0,
+                    )
+                    time.sleep(0.1)
+                    continue
+
+                result = self.dino.detect(image_top, "bottle")
+
+                if len(result.boxes) == 0:
+                    self.get_logger().warn("No bottle detected in top camera.")
+                    cv2.imshow("Detection Result", image_top)
+                    cv2.waitKey(10)
+                    continue
+
+                try:
+                    annotated_image = self.dino.annotate(image_top, result, draw_mask=True)
+                except Exception:
+                    self.get_logger().warn("Bottle annotate failed, showing original image")
+                    annotated_image = image_top
+
+                cv2.imshow("Detection Result", annotated_image)
+                cv2.waitKey(10)
+
+                break
+
+            mid_x = (result.boxes[0, 0] + result.boxes[0, 2]) / 2
+            mid_y = (result.boxes[0, 1] + result.boxes[0, 3]) / 2
+
+            self.get_logger().info(f"Mid pixel: ({mid_x}, {mid_y})")
+
+            mid_coordinate = self.pixel_to_base_link("camera_top", mid_x, mid_y)
+
+            if mid_coordinate is None:
+                self.get_logger().error("Failed to compute 3D coordinate of bottle center.")
+                continue
+
+            self._publish_detection_marker(mid_coordinate)
+
+            left_arm_z_axis = mid_coordinate[2]
+
+            # 15cm away from bottle
+            pose_approach = Pose()
+            pose_approach.position.x = mid_coordinate[0] - 0.15
+            pose_approach.position.y = mid_coordinate[1]
+            pose_approach.position.z = mid_coordinate[2]
+            pose_approach.orientation.x = -0.5022768378257751
+            pose_approach.orientation.y = 0.4977162480354309
+            pose_approach.orientation.z = -0.5023228526115417
+            pose_approach.orientation.w = 0.4976627230644226
+
+            self.get_logger().info(f"############# Move to pose {pose_approach} ###############")
+
+            # move arm
+            plan_result = self.mover.plan_pose('Arm1', pose_approach, planner=Planner.ompl)
+
+            if plan_result is None:
+                self.get_logger().error("################### Moveit Planning Failed #################")
+                continue
+
+            break
+
+        if not self.mover.execute(plan_result.trajectory):
+            self.get_logger().error("Step 1 trajectory execution failed; aborting task.")
             return
-        
-        result = self.dino.detect(image_top,"bottle")
 
-        if len(result.scores) == 0:
-            self.get_logger().error("No bottle detected in top camera.")
-            return
-        
-        annotated_image = self.dino.annotate(image_top,result,draw_mask=True)
-        cv2.imshow("Detection Result", annotated_image)
-        cv2.waitKey(10)
-        
-        mid_x = (result.boxes[0,0]+result.boxes[0,2])/2
-        mid_y = (result.boxes[0,1]+result.boxes[0,3])/2
-
-        self.get_logger().info(f"Mid pixel: ({mid_x}, {mid_y})")
-        
-        mid_coordinate = self.pixel_to_base_link("camera_top",mid_x,mid_y)
-
-        if mid_coordinate is None:
-            self.get_logger().warn("Failed to compute 3D coordinate of bottle center.")
-            return
-
-        self._publish_detection_marker(mid_coordinate)
-
-        # rot = Rotation.from_euler('xyz',[0,0,0]).as_quat()
-
-        # 10cm away from bottle
-        pose_approach = Pose()
-        pose_approach.position.x = mid_coordinate[0] - 0.07
-        pose_approach.position.y = mid_coordinate[1]
-        pose_approach.position.z = mid_coordinate[2]
-        pose_approach.orientation.x = -0.5022768378257751
-        pose_approach.orientation.y = 0.4977162480354309
-        pose_approach.orientation.z = -0.5023228526115417
-        pose_approach.orientation.w = 0.4976627230644226
-
-        self.get_logger().info(f"############# Move to pose {pose_approach} ###############")
-
-        # move arm
-        plan_result = self.mover.plan_pose('Arm1',pose_approach,planner=Planner.ompl)
-
-        self.mover.execute(plan_result.trajectory)
-
-        return 
+        # 按“本节点收到的帧序号”等待下一帧，不比较 ROS now() 与相机硬件时间戳。
+        # RealSense 消息时间可能来自设备时钟，与节点时钟并非同一时间基准。
+        step1_finish_sequence = self.get_color_sequence("camera_left")
+        step1_finish_depth_sequence = self.get_depth_sequence("camera_left")
 
         """
         Step 2: Grasp bottle
         """
-        image_left = self.get_latest_color("camera_left")
-        result = self.dino.detect(image_left,"bottle")
+        fresh_frame_deadline = time.monotonic() + _FRESH_FRAME_TIMEOUT_SEC
+        # Panning Loop
+        while rclpy.ok():
+            # Capture Loop — 等待 Arm1 移动后 camera_left 的新帧
+            while rclpy.ok():
+                image_left = self.get_latest_color("camera_left",
+                                                   after_sequence=step1_finish_sequence)
+                has_fresh_depth = (
+                    self.get_depth_sequence("camera_left")
+                    > step1_finish_depth_sequence
+                )
 
-        mid_x = (result.boxes[0]+result.boxes[3])/2
-        mid_y = (result.boxes[1]+result.boxes[4])/2
-        
-        mid_coordinate = self.pixel_to_base_link("camera_left",mid_x,mid_y)
-        
-        rot = Rotation.from_euler('xyz',[0,0,np.radians(-90)])
+                if image_left is None or not has_fresh_depth:
+                    if time.monotonic() >= fresh_frame_deadline:
+                        current_sequence = self.get_color_sequence("camera_left")
+                        current_depth_sequence = self.get_depth_sequence("camera_left")
+                        self.get_logger().error(
+                            "Timed out waiting for fresh left camera color/depth "
+                            f"(color {step1_finish_sequence}->{current_sequence}, "
+                            f"depth {step1_finish_depth_sequence}->"
+                            f"{current_depth_sequence}). Check camera topics and QoS."
+                        )
+                        return
+                    self.get_logger().warn(
+                        "Waiting for fresh left camera color/depth after arm movement...",
+                        throttle_duration_sec=2.0,
+                    )
+                    time.sleep(0.1)
+                    continue
 
-        # 10cm away from bottle
-        pose_grasp = Pose()
-        pose_grasp.position.x = mid_coordinate[0]
-        pose_grasp.position.y = mid_coordinate[1]
-        pose_grasp.position.z = mid_coordinate[2]
-        pose_grasp.orientation.x = rot[0]
-        pose_grasp.orientation.y = rot[1]
-        pose_grasp.orientation.z = rot[2]
-        pose_grasp.orientation.w = rot[3]
+                result = self.dino.detect(image_left, "biggest cylinder")
 
-        # move arm
-        self.mover.plan_pose('Arm1',pose_approach,'L1_gripper_tcp',Planner.pilz_ptp)
+                if len(result.boxes) == 0:
+                    self.get_logger().warn("No bottle detected in left camera.")
+                    cv2.imshow("Detection Result", image_left)
+                    cv2.waitKey(10)
+                    continue
 
-        # Grasp bottle
-        self.gripper.set_torque(100) # TODO
-        self.gripper.close("left", speed=1.0)
+                try:
+                    annotated_image = self.dino.annotate(image_left, result, draw_mask=True)
+                except Exception:
+                    self.get_logger().warn("Bottle annotate failed, showing original image")
+                    annotated_image = image_left
 
-        # return # for test
-        """
-        Step 3: Grasp bottle cap
-        """
-        image_top = self.get_latest_color("camera_top")
-        result = self.dino.detect(image_top,"bottle cap")
-        
-        mid_x = (result.boxes[0]+result.boxes[3])/2
-        mid_y = (result.boxes[1]+result.boxes[4])/2
-        
-        mid_coordinate = self.pixel_to_base_link("camera_top",mid_x,mid_y)
+                cv2.imshow("Detection Result", annotated_image)
+                cv2.waitKey(10)
 
-        rot = Rotation.from_euler('xyz',[0,0,np.radians(-90)])
+                break
 
-        # 10cm away from bottle
-        pose_approach = Pose()
-        pose_approach.position.x = mid_coordinate[0] + 0.1
-        pose_approach.position.y = mid_coordinate[1]
-        pose_approach.position.z = mid_coordinate[2]
-        pose_approach.orientation.x = rot[0]
-        pose_approach.orientation.y = rot[1]
-        pose_approach.orientation.z = rot[2]
-        pose_approach.orientation.w = rot[3]
+            mid_x = (result.boxes[0, 0] + result.boxes[0, 2]) / 2
+            mid_y = (result.boxes[0, 1] + result.boxes[0, 3]) / 2
 
-        # move arm
-        self.mover.plan_pose('Arm2',pose_approach,'L1_gripper_tcp',Planner.ompl)
+            self.get_logger().info(f"Mid pixel: ({mid_x}, {mid_y})")
 
-        """
-        Step 4: Grasp bottle cap
-        """
-        image_left = self.get_latest_color("camera_right")
-        result = self.dino.detect(image_left,"white bottle cap")
+            mid_coordinate = self.pixel_to_base_link("camera_left", mid_x, mid_y)
 
-        mid_x = (result.boxes[0]+result.boxes[3])/2
-        mid_y = (result.boxes[1]+result.boxes[4])/2
-        
-        mid_coordinate = self.pixel_to_base_link("camera_right",mid_x,mid_y)
-        
-        rot = Rotation.from_euler('xyz',[0,0,np.radians(-90)])
+            if mid_coordinate is None:
+                self.get_logger().error("Failed to compute 3D coordinate of bottle center.")
+                continue
 
-        # 10cm away from bottle
-        pose_grasp = Pose()
-        pose_grasp.position.x = mid_coordinate[0]
-        pose_grasp.position.y = mid_coordinate[1]
-        pose_grasp.position.z = mid_coordinate[2]
-        pose_grasp.orientation.x = rot[0]
-        pose_grasp.orientation.y = rot[1]
-        pose_grasp.orientation.z = rot[2]
-        pose_grasp.orientation.w = rot[3]
+            self._publish_detection_marker(mid_coordinate)
 
-        # move arm
-        self.mover.plan_pose('Arm2',pose_approach,'L1_gripper_tcp',Planner.pilz_ptp)
+            # 15cm away from bottle
+            pose_approach = Pose()
+            pose_approach.position.x = mid_coordinate[0]
+            pose_approach.position.y = mid_coordinate[1]
+            pose_approach.position.z = left_arm_z_axis
+            pose_approach.orientation.x = -0.5022768378257751
+            pose_approach.orientation.y = 0.4977162480354309
+            pose_approach.orientation.z = -0.5023228526115417
+            pose_approach.orientation.w = 0.4976627230644226
 
-        # Grasp bottle
-        self.gripper.set_torque(100) # TODO
-        self.gripper.close("right", speed=1.0)
+            self.get_logger().info(f"############# Move to pose {pose_approach} ###############")
 
-        """
-        Step 5: Open bottle cap
-        """
+            # move arm
+            plan_result = self.mover.plan_pose('Arm1', pose_approach, planner=Planner.pilz_ptp)
 
-        # TODO:
+            if plan_result is None:
+                self.get_logger().error("################### Moveit Planning Failed #################")
+                continue
 
+            break
+
+        if not self.mover.execute(plan_result.trajectory):
+            self.get_logger().error("Step 2 trajectory execution failed.")
 
     # ------------------------------------------------------------------
     # 检测点 Marker 可视化
@@ -314,7 +350,7 @@ class XTrainerTask(Node):
     # 彩色回调
     # ------------------------------------------------------------------
     def _color_callback(self, camera_name: str, msg: Image) -> None:
-        """将彩色帧转为 BGR 并缓存到 self._color_frames[camera_name]。"""
+        """将彩色帧转为 BGR 并存入快照。"""
         try:
             color_bgr = self.ros_image_to_cv2(msg)
         except Exception as e:
@@ -323,22 +359,54 @@ class XTrainerTask(Node):
                 throttle_duration_sec=5.0,
             )
             return
-        with self._color_lock:
-            self._color_frames[camera_name] = color_bgr
+        with self._snapshots_lock:
+            snap = self._snapshots.setdefault(camera_name, {})
+            snap['color'] = color_bgr
+            snap['color_sequence'] = snap.get('color_sequence', 0) + 1
+            snap['color_stamp'] = msg.header.stamp
 
     # ------------------------------------------------------------------
     # 彩色查询 API
     # ------------------------------------------------------------------
-    def get_latest_color(self, camera_name: str) -> Optional[np.ndarray]:
-        """返回最近一帧彩色图 (H×W×3 BGR uint8), 无缓存返回 None。"""
-        with self._color_lock:
-            return self._color_frames.get(camera_name)
+    def get_latest_color(
+        self,
+        camera_name: str,
+        after_sequence: Optional[int] = None,
+    ) -> Optional[np.ndarray]:
+        """返回最近一帧彩色图 (H×W×3 BGR uint8).
+
+        Parameters
+        ----------
+        camera_name : str
+            相机名.
+        after_sequence : int or None
+            若提供，只返回序号严格大于该值的帧（用于可靠等待回调收到新帧）。
+
+        Returns
+        -------
+        np.ndarray or None
+            无快照或帧过旧时返回 None.
+        """
+        with self._snapshots_lock:
+            snap = self._snapshots.get(camera_name)
+            if snap is None or 'color' not in snap:
+                return None
+            if (after_sequence is not None
+                    and snap.get('color_sequence', 0) <= after_sequence):
+                return None
+            return snap['color']
+
+    def get_color_sequence(self, camera_name: str) -> int:
+        """返回本节点已接收的彩色帧序号；尚未收到图像时返回 0。"""
+        with self._snapshots_lock:
+            snap = self._snapshots.get(camera_name)
+            return snap.get('color_sequence', 0) if snap else 0
 
     # ------------------------------------------------------------------
     # 深度回调
     # ------------------------------------------------------------------
     def _depth_callback(self, camera_name: str, msg: Image) -> None:
-        """将对齐深度帧缓存到 self._depth_frames[camera_name]。"""
+        """将对齐深度帧存入快照。"""
         try:
             depth = self._ros_depth_to_mm(msg)
         except Exception as e:
@@ -347,8 +415,18 @@ class XTrainerTask(Node):
                 throttle_duration_sec=5.0,
             )
             return
-        with self._depth_lock:
-            self._depth_frames[camera_name] = depth
+        with self._snapshots_lock:
+            snap = self._snapshots.setdefault(camera_name, {})
+            snap['depth'] = depth
+            snap['depth_sequence'] = snap.get('depth_sequence', 0) + 1
+            snap['depth_stamp'] = msg.header.stamp
+            snap['depth_frame_id'] = msg.header.frame_id
+
+    def get_depth_sequence(self, camera_name: str) -> int:
+        """返回本节点已接收的深度帧序号；尚未收到图像时返回 0。"""
+        with self._snapshots_lock:
+            snap = self._snapshots.get(camera_name)
+            return snap.get('depth_sequence', 0) if snap else 0
 
     # ------------------------------------------------------------------
     # 深度查询 API
@@ -360,7 +438,7 @@ class XTrainerTask(Node):
         v: int,
         window: int = 1,
     ) -> Optional[float]:
-        """查询指定像素位置的对齐深度值 (物理尺度, 毫米)。
+        """查询指定像素位置的最新深度值 (物理尺度, 毫米).
 
         Parameters
         ----------
@@ -375,13 +453,14 @@ class XTrainerTask(Node):
         Returns
         -------
         float or None
-            深度值 (mm), 如果无缓 或无有效值则返回 None.
+            深度值 (mm), 如果无最新帧或无有效值则返回 None.
         """
         u = int(u)
         v = int(v)
 
-        with self._depth_lock:
-            depth = self._depth_frames.get(camera_name)
+        with self._snapshots_lock:
+            snap = self._snapshots.get(camera_name)
+            depth = snap.get('depth') if snap else None
 
         if depth is None:
             self.get_logger().warn(
@@ -391,6 +470,12 @@ class XTrainerTask(Node):
             return None
 
         h, w = depth.shape
+        if not (0 <= u < w and 0 <= v < h):
+            self.get_logger().warn(
+                f"[{camera_name}] pixel ({u}, {v}) outside depth image {w}x{h}",
+                throttle_duration_sec=2.0,
+            )
+            return None
         half = window // 2
 
         # 边界裁剪
@@ -408,15 +493,16 @@ class XTrainerTask(Node):
         return float(np.median(valid))
 
     def get_latest_depth(self, camera_name: str) -> Optional[np.ndarray]:
-        """返回最近一帧对齐深度图 (mm, uint16), 无缓存返回 None。"""
-        with self._depth_lock:
-            return self._depth_frames.get(camera_name)
+        """返回最近一帧对齐深度图 (mm, uint16), 无最新帧返回 None."""
+        with self._snapshots_lock:
+            snap = self._snapshots.get(camera_name)
+            return snap.get('depth') if snap else None
 
     # ------------------------------------------------------------------
     # 相机内参回调
     # ------------------------------------------------------------------
     def _camera_info_callback(self, camera_name: str, msg: CameraInfo) -> None:
-        """缓存 camera_info (用于 pixel→3D 反投影)。"""
+        """存入 camera_info 快照 (用于 pixel→3D 反投影)."""
         with self._camera_info_lock:
             self._camera_infos[camera_name] = msg
 
@@ -473,24 +559,30 @@ class XTrainerTask(Node):
         # ── 3. 反投影: 像素 → 相机光学坐标 (右手系: X右 Y下 Z前) ──
         fx, fy = info.k[0], info.k[4]
         cx, cy = info.k[2], info.k[5]
+        if fx == 0.0 or fy == 0.0:
+            self.get_logger().error(f"[{camera_name}] invalid camera intrinsics")
+            return None
 
         x_cam = (u - cx) / fx * depth_m
         y_cam = (v - cy) / fy * depth_m
         z_cam = depth_m
 
         # ── 4. tf2 变换到 base_link ──────────────────────────
-        optical_frame = _CAMERA_OPTICAL_FRAMES.get(camera_name)
-        if optical_frame is None:
+        # CameraInfo 的 frame_id 是驱动实际使用的彩色光学坐标系，避免硬编码
+        # camera_*_color_frame / camera_*_color_optical_frame 名称出错。
+        optical_frame = info.header.frame_id
+        if not optical_frame:
             self.get_logger().error(
-                f"[{camera_name}] unknown optical frame — "
-                f"update _CAMERA_OPTICAL_FRAMES",
+                f"[{camera_name}] camera_info has an empty frame_id",
                 throttle_duration_sec=10.0,
             )
             return None
 
         p_cam = PointStamped()
         p_cam.header.frame_id = optical_frame
-        p_cam.header.stamp = self.get_clock().now().to_msg()
+        # Time(0) 请求最新可用 TF。对腕部相机使用 now() 容易因 TF 与图像发布
+        # 存在几毫秒延迟而触发 future extrapolation。
+        p_cam.header.stamp = rclpy.time.Time().to_msg()
         p_cam.point.x = x_cam
         p_cam.point.y = y_cam
         p_cam.point.z = z_cam
@@ -521,13 +613,17 @@ class XTrainerTask(Node):
                 f"Unsupported depth encoding: '{msg.encoding}', "
                 f"expected one of {_DEPTH_ENCODINGS}"
             )
-        expected_step = msg.width * 2
-        if msg.step != expected_step:
+        row_bytes = msg.width * 2
+        if msg.step < row_bytes:
             raise ValueError(
-                f"Unexpected step={msg.step}, expected {expected_step}"
+                f"Unexpected step={msg.step}, expected at least {row_bytes}"
             )
-        raw = np.frombuffer(msg.data, dtype=np.uint16)
-        return raw.reshape((msg.height, msg.width))
+        raw = np.frombuffer(msg.data, dtype=np.uint8).reshape((msg.height, msg.step))
+        packed = np.ascontiguousarray(raw[:, :row_bytes])
+        dtype = np.dtype('>u2' if msg.is_bigendian else '<u2')
+        return packed.view(dtype).reshape((msg.height, msg.width)).astype(
+            np.uint16, copy=False
+        )
 
     @staticmethod
     def ros_image_to_cv2(msg: Image) -> np.ndarray:
@@ -550,17 +646,17 @@ class XTrainerTask(Node):
                 f"Unsupported encoding: '{msg.encoding}', "
                 f"expected one of {_COLOR_ENCODINGS}"
             )
-        expected_step = msg.width * 3
-        if msg.step != expected_step:
+        row_bytes = msg.width * 3
+        if msg.step < row_bytes:
             raise ValueError(
-                f"Unexpected step={msg.step}, expected {expected_step}"
+                f"Unexpected step={msg.step}, expected at least {row_bytes}"
             )
 
-        raw = np.frombuffer(msg.data, dtype=np.uint8)
-        frame = raw.reshape((msg.height, msg.width, 3))
+        raw = np.frombuffer(msg.data, dtype=np.uint8).reshape((msg.height, msg.step))
+        frame = raw[:, :row_bytes].reshape((msg.height, msg.width, 3))
         if msg.encoding == "rgb8":
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-        return frame
+        return np.ascontiguousarray(frame)
 
     # ------------------------------------------------------------------
     # 位姿读取

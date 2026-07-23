@@ -173,6 +173,78 @@ class RobotMover:
         return pose
 
     # ------------------------------------------------------------------
+    # Planning — named target (SRDF group_state)
+    # ------------------------------------------------------------------
+
+    def plan_named(
+        self,
+        arm: str,
+        target_name: str,
+        *,
+        planner: Planner | str = Planner.ompl,
+    ) -> Optional[Any]:
+        """Plan a move for *arm* to a predefined named target in the SRDF.
+
+        Named targets are ``<group_state>`` entries defined in the SRDF
+        under the group corresponding to *arm* (e.g. ``"Home1"`` for Arm1).
+
+        Parameters
+        ----------
+        arm : str
+            ``'Arm1'`` or ``'Arm2'``.
+        target_name : str
+            Name of the ``<group_state>`` in the SRDF (e.g. ``"Home1"``).
+        planner : Planner | str
+            Planner to use (default :attr:`Planner.ompl`).
+
+        Returns
+        -------
+        PlanResult or None
+        """
+        pc = self._get_planning_component(arm)
+        pc.set_start_state_to_current_state()
+
+        # Apply planner override if non-default
+        planner_cfg = self._resolve_planner(planner)
+        if planner_cfg is not None:
+            pc.planning_pipeline = planner_cfg.planning_pipeline
+            pc.planner_id = planner_cfg.planner_id
+
+        # Validate target exists
+        named_states = pc.named_target_states
+        if target_name not in named_states:
+            self._logger.error(
+                f"[{arm}] unknown named target '{target_name}'. "
+                f"Available: {named_states}"
+            )
+            return None
+
+        # Set goal from named target joint values
+        joint_dict = pc.get_named_target_state_values(target_name)
+        import numpy as np
+        joint_values = np.array([joint_dict[jn] for jn in joint_dict])
+        group_name = self._ARM_CONFIG[arm]['group_name']
+        robot_state = RobotState(self._robot_model)
+        robot_state.set_joint_group_positions(group_name, joint_values)
+        pc.set_goal_state(robot_state=robot_state)
+
+        self._logger.info(
+            f"[{arm}] planning to named target '{target_name}' "
+            f"(planner={planner_cfg.name if planner_cfg else 'ompl'}) …"
+        )
+        plan_result = pc.plan()
+        if not plan_result:
+            self._logger.error(
+                f"[{arm}] planning to '{target_name}' failed"
+            )
+            return None
+
+        n_pts = len(plan_result.trajectory)
+        self._logger.info(f"[{arm}] plan OK ({n_pts} waypoints)")
+        self._display_trajectory(plan_result.trajectory)
+        return plan_result
+
+    # ------------------------------------------------------------------
     # Planning — joint space
     # ------------------------------------------------------------------
 
