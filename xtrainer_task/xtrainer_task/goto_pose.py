@@ -34,12 +34,13 @@ def main():
         # plan_result = mover.plan_pose('Arm1', pose_approach, planner=Planner.ompl)
         # mover.execute(plan_result.trajectory)
 
-        plan_result_1 = mover.plan_named("Arm1","Home1")
-        if plan_result_1 is not None:
-            mover.execute(plan_result_1.trajectory)
         plan_result_2 = mover.plan_named("Arm2","Home2")
         if plan_result_2 is not None:
             mover.execute(plan_result_2.trajectory)
+
+        plan_result_1 = mover.plan_named("Arm1","Home1")
+        if plan_result_1 is not None:
+            mover.execute(plan_result_1.trajectory)
         
         time.sleep(1.0)
 

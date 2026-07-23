@@ -193,19 +193,19 @@ class XTrainerTask(Node):
             left_arm_z_axis = mid_coordinate[2]
 
             # 20cm away from bottle, 10 cm lower from top
-            pose_approach = Pose()
-            pose_approach.position.x = mid_coordinate[0] - 0.20 # offset
-            pose_approach.position.y = mid_coordinate[1]
-            pose_approach.position.z = mid_coordinate[2] - 0.05 # offset
-            pose_approach.orientation.x = -0.5022768378257751
-            pose_approach.orientation.y = 0.4977162480354309
-            pose_approach.orientation.z = -0.5023228526115417
-            pose_approach.orientation.w = 0.4976627230644226
+            pose_prepare = Pose()
+            pose_prepare.position.x = mid_coordinate[0] - 0.20 # offset
+            pose_prepare.position.y = mid_coordinate[1]
+            pose_prepare.position.z = mid_coordinate[2] - 0.05 # offset
+            pose_prepare.orientation.x = -0.5022768378257751
+            pose_prepare.orientation.y = 0.4977162480354309
+            pose_prepare.orientation.z = -0.5023228526115417
+            pose_prepare.orientation.w = 0.4976627230644226
 
-            self.get_logger().info(f"############# Move to pose {pose_approach} ###############")
+            self.get_logger().info(f"############# Move to pose {pose_prepare} ###############")
 
             # move arm
-            plan_result = self.mover.plan_pose('Arm1', pose_approach, planner=Planner.ompl)
+            plan_result = self.mover.plan_pose('Arm1', pose_prepare, planner=Planner.ompl)
 
             if plan_result is None:
                 self.get_logger().error("################### Moveit Planning Failed #################")
@@ -267,7 +267,7 @@ class XTrainerTask(Node):
 
             # 15cm away from bottle
             pose_approach = Pose()
-            pose_approach.position.x = mid_coordinate[0] + 0.05 # offset
+            pose_approach.position.x = mid_coordinate[0]
             pose_approach.position.y = mid_coordinate[1]
             pose_approach.position.z = left_arm_z_axis - 0.05
             pose_approach.orientation.x = -0.5022768378257751
@@ -289,6 +289,107 @@ class XTrainerTask(Node):
         self.mover.execute(plan_result.trajectory)
 
         self.gripper.close("left")
+
+        """
+        Step 3: Move right hand TODO:
+        """
+
+        # Panning Loop
+        while rclpy.ok():
+
+            # 20 cm upper from left tcp
+            pose_pregrasp = pose_approach
+            pose_pregrasp.position.z = pose_pregrasp.position.z + 0.2
+            pose_pregrasp.orientation.x = 0.9999992251396179
+            pose_pregrasp.orientation.y = 3.387355945960735e-06
+            pose_pregrasp.orientation.z = -0.0012208677362650633
+            pose_pregrasp.orientation.w = 5.662425792252179e-06
+
+            self.get_logger().info(f"############# Move to pose {pose_pregrasp} ###############")
+
+            # move arm
+            plan_result = self.mover.plan_pose('Arm2', pose_pregrasp, planner=Planner.ompl)
+
+            if plan_result is None:
+                self.get_logger().error("################### Moveit Planning Failed #################")
+                continue
+
+            break
+
+        self.mover.execute(plan_result.trajectory) 
+
+        step3_finish_time = self.get_clock().now()   
+
+        """
+        Step 4: Move upstraight
+        """
+        # Panning Loop
+        while rclpy.ok():
+            while rclpy.ok():
+                image_right = self.get_latest_color("camera_right",
+                                                    min_stamp=step3_finish_time)
+
+                if image_right is None:
+                    self.get_logger().error("No right camera image available.")
+                    time.sleep(0.05)
+                    continue
+
+                result = self.dino.detect(image_right, "white cap")
+
+                if len(result.boxes) == 0:
+                    self.get_logger().warn("No bottle detected in right camera.")
+                    cv2.imshow("Detection Result", image_right)
+                    cv2.waitKey(10)
+                    continue
+
+                try:
+                    annotated_image = self.dino.annotate(image_right, result, draw_mask=True)
+                except Exception:
+                    self.get_logger().warn("Bottle annotate failed, showing original image")
+                    annotated_image = image_right
+
+                cv2.imshow("Detection Result", annotated_image)
+                cv2.waitKey(10)
+
+                break
+
+            mid_x = (result.boxes[0, 0] + result.boxes[0, 2]) / 2
+            mid_y = (result.boxes[0, 1] + result.boxes[0, 3]) / 2
+
+            self.get_logger().info(f"Mid pixel: ({mid_x}, {mid_y})")
+
+            mid_coordinate = self.pixel_to_base_link("camera_right", mid_x, mid_y)
+
+            if mid_coordinate is None:
+                self.get_logger().error("Failed to compute 3D coordinate of bottle center.")
+                continue
+
+            self._publish_detection_marker(mid_coordinate)
+
+            # 5cm up from bottle
+            pose_grasp = Pose()
+            pose_grasp.position.x = mid_coordinate[0]
+            pose_grasp.position.y = mid_coordinate[1]
+            pose_grasp.position.z = mid_coordinate[2] + 0.05
+            pose_grasp.orientation.x = 0.9999992251396179
+            pose_grasp.orientation.y = 3.387355945960735e-06
+            pose_grasp.orientation.z = -0.0012208677362650633
+            pose_grasp.orientation.w = 5.662425792252179e-06
+
+            self.get_logger().info(f"############# Move to pose {pose_grasp} ###############")
+
+            # move arm
+            plan_result = self.mover.plan_pose('Arm2', pose_grasp, planner=Planner.pilz_lin)
+
+            if plan_result is None:
+                self.get_logger().error("################### Moveit Planning Failed #################")
+                continue
+
+            break
+
+        self.mover.execute(plan_result.trajectory)
+
+        self.gripper.close("right")
 
     # ------------------------------------------------------------------
     # 检测点 Marker 可视化
