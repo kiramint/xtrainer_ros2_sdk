@@ -22,30 +22,22 @@ def main():
     time.sleep(2.0)
 
     try:
+        while rclpy.ok():
+            rclpy.spin_once(node, timeout_sec=0.1)
 
-        # pose_approach = Pose()
-        # pose_approach.position.x = 0.2961321175098419
-        # pose_approach.position.y = -0.15465658903121948
-        # pose_approach.position.z = 0.6162363290786743
-        # pose_approach.orientation.x = -0.5022768378257751
-        # pose_approach.orientation.y = 0.4977162480354309
-        # pose_approach.orientation.z = -0.5023228526115417
-        # pose_approach.orientation.w = 0.4976627230644226
+            pose_approach = Pose()
+            pose_approach.position.x = 0.2961321175098419
+            pose_approach.position.y = -0.15465658903121948
+            pose_approach.position.z = 0.6162363290786743
+            pose_approach.orientation.x = -0.5022768378257751
+            pose_approach.orientation.y = 0.4977162480354309
+            pose_approach.orientation.z = -0.5023228526115417
+            pose_approach.orientation.w = 0.4976627230644226
 
-        # plan_result = mover.plan_pose('Arm1', pose_approach, planner=Planner.ompl)
-        # mover.execute(plan_result.trajectory)
-
-        # if plan_result is not None:
-        #     break
-
-        plan_result_1 = mover.plan_named("Arm1","Home1")
-        if plan_result_1 is not None:
-                    mover.execute(plan_result_1.trajectory)
-        plan_result_2 = mover.plan_named("Arm2","Home2")
-        if plan_result_2 is not None:
-                    mover.execute(plan_result_2.trajectory)
+            plan_result = mover.plan_pose('Arm1', pose_approach, planner=Planner.ompl)
+            mover.execute(plan_result.trajectory)
             
-            
+            time.sleep(1.0)
     except KeyboardInterrupt:
         pass
     finally:
