@@ -12,6 +12,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', ['launch/start.launch.py']),
         ('share/' + package_name + '/launch', ['launch/read_pose.launch.py']),
+        ('share/' + package_name + '/launch', ['launch/goto_pose.launch.py']),
         ('share/' + package_name + '/config', ['config/moveit_cpp.yaml',
                                                  'config/xtrainer.rviz']),
     ],
@@ -31,6 +32,7 @@ setup(
             'start = xtrainer_task.start:main',
             'dino_test = xtrainer_task.dino_test:main',
             'read_pose = xtrainer_task.read_pose:main',
+            'goto_pose = xtrainer_task.goto_pose:main',
         ],
     },
 )

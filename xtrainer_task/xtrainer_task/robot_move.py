@@ -145,10 +145,8 @@ class RobotMover:
 
     def _display_trajectory(self, trajectory):
         msg = DisplayTrajectory()
-        msg.model_id = self._robot_model.getName()
-        msg.trajectory.append(trajectory)
-        with self._planning_scene_monitor.read_only() as scene:
-            msg.trajectory_start = scene.current_state.toRobotStateMsg()
+        msg.model_id = self._robot_model.name
+        msg.trajectory.append(trajectory.get_robot_trajectory_msg())
         self._display_pub.publish(msg)
 
     # ------------------------------------------------------------------
@@ -229,7 +227,7 @@ class RobotMover:
             self._logger.error(f"[{arm}] planning failed")
             return None
 
-        n_pts = len(plan_result.trajectory.joint_trajectory.points)
+        n_pts = len(plan_result.trajectory)
         self._logger.info(f"[{arm}] plan OK ({n_pts} waypoints)")
         self._display_trajectory(plan_result.trajectory)
         return plan_result
@@ -292,7 +290,7 @@ class RobotMover:
             self._logger.error(f"[{arm}] planning failed")
             return None
 
-        n_pts = len(plan_result.trajectory.joint_trajectory.points)
+        n_pts = len(plan_result.trajectory)
         self._logger.info(f"[{arm}] plan OK ({n_pts} waypoints)")
         self._display_trajectory(plan_result.trajectory)
         return plan_result

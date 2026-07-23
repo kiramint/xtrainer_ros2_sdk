@@ -134,16 +134,20 @@ class XTrainerTask(Node):
         Step 1: Approach
         """
         image_top = self.get_latest_color("camera_top")
+
+        if image_top is None:
+            self.get_logger().error("No top camera image available.")
+            return
         
         result = self.dino.detect(image_top,"bottle")
 
         if len(result.scores) == 0:
-            self.get_logger().warn("No bottle detected in top camera.")
+            self.get_logger().error("No bottle detected in top camera.")
             return
         
         annotated_image = self.dino.annotate(image_top,result,draw_mask=True)
         cv2.imshow("Detection Result", annotated_image)
-        cv2.waitKey(1)
+        cv2.waitKey(10)
         
         mid_x = (result.boxes[0,0]+result.boxes[0,2])/2
         mid_y = (result.boxes[0,1]+result.boxes[0,3])/2
@@ -158,24 +162,24 @@ class XTrainerTask(Node):
 
         self._publish_detection_marker(mid_coordinate)
 
-        rot = Rotation.from_euler('xyz',[0,0,0]).as_quat()
+        # rot = Rotation.from_euler('xyz',[0,0,0]).as_quat()
 
         # 10cm away from bottle
         pose_approach = Pose()
-        pose_approach.position.x = mid_coordinate[0] - 0.1
+        pose_approach.position.x = mid_coordinate[0] - 0.07
         pose_approach.position.y = mid_coordinate[1]
         pose_approach.position.z = mid_coordinate[2]
-        pose_approach.orientation.x = rot[0]
-        pose_approach.orientation.y = rot[1]
-        pose_approach.orientation.z = rot[2]
-        pose_approach.orientation.w = rot[3]
+        pose_approach.orientation.x = -0.5022768378257751
+        pose_approach.orientation.y = 0.4977162480354309
+        pose_approach.orientation.z = -0.5023228526115417
+        pose_approach.orientation.w = 0.4976627230644226
 
         self.get_logger().info(f"############# Move to pose {pose_approach} ###############")
 
         # move arm
-        traj = self.mover.plan_pose('Arm1',pose_approach,frame_id='L1_gripper_tcp',planner=Planner.ompl)
+        plan_result = self.mover.plan_pose('Arm1',pose_approach,planner=Planner.ompl)
 
-        self.mover.execute(traj)
+        self.mover.execute(plan_result.trajectory)
 
         return 
 
