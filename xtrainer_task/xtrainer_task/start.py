@@ -10,6 +10,7 @@ Usage
 """
 
 
+import math
 import sys
 import threading
 import time
@@ -41,6 +42,11 @@ _COLOR_TOPIC_TEMPLATE = "/camera/{name}/color/image_raw"
 _DEPTH_TOPIC_TEMPLATE = "/camera/{name}/aligned_depth_to_color/image_raw"
 
 _CAMERA_NAMES = ("camera_top", "camera_left", "camera_right")
+
+_CAP_TURN_DEG = 180.0
+_CAP_TURN_COUNT = 4
+_CAP_GRIPPER_SETTLE_SEC = 1.0
+_CAP_LIFT_DISTANCE_M = 0.05
 
 _CAMERA_OPTICAL_FRAMES: Dict[str, str] = {
     "camera_top": "camera_top_color_frame",
@@ -390,6 +396,105 @@ class XTrainerTask(Node):
         self.mover.execute(plan_result.trajectory)
 
         self.gripper.close("right")
+
+        """
+        Step 5: Open cap — rotate Arm2 wrist counter-clockwise
+        """
+
+        # A gripper holding the cap may remain MOVING because it cannot reach
+        # its mechanical CLOSED endpoint. Allow time to build grip force and
+        # abort only on an explicit driver error.
+        time.sleep(_CAP_GRIPPER_SETTLE_SEC)
+        if self.gripper.read_status("right") == "ERROR":
+            self.get_logger().error(
+                "Right gripper reported ERROR; aborting cap opening"
+            )
+            return
+
+        for turn in range(1, _CAP_TURN_COUNT + 1):
+            self.get_logger().info(
+                f"Opening cap: turn {turn}/{_CAP_TURN_COUNT}"
+            )
+
+            # Viewed from above the cap along the downward-facing gripper
+            # axis, negative J2_6 rotation is counter-clockwise (verified on
+            # the physical robot).
+            if not self._rotate_cap_wrist(-_CAP_TURN_DEG, turn, "open"):
+                return
+
+            if turn == _CAP_TURN_COUNT:
+                break
+
+            # Release the cap before resetting the wrist, otherwise the
+            # clockwise return motion would tighten the cap again.
+            self.gripper.open("right")
+            time.sleep(_CAP_GRIPPER_SETTLE_SEC)
+            if self.gripper.read_status("right") == "ERROR":
+                self.get_logger().error(
+                    f"Right gripper ERROR after turn {turn} release"
+                )
+                return
+
+            if not self._rotate_cap_wrist(_CAP_TURN_DEG, turn, "reset"):
+                return
+
+            self.gripper.close("right")
+            time.sleep(_CAP_GRIPPER_SETTLE_SEC)
+            if self.gripper.read_status("right") == "ERROR":
+                self.get_logger().error(
+                    f"Right gripper ERROR after turn {turn} re-grasp"
+                )
+                return
+
+        # Keep holding the cap after the final turn and lift it vertically.
+        pose_lift = self.mover.get_current_pose("Arm2")
+        pose_lift.position.z += _CAP_LIFT_DISTANCE_M
+        self.get_logger().info(
+            f"Lifting opened cap by {_CAP_LIFT_DISTANCE_M:.3f} m"
+        )
+        plan_result = self.mover.plan_pose(
+            "Arm2", pose_lift, planner=Planner.pilz_lin
+        )
+        if plan_result is None:
+            self.get_logger().error("Opened-cap lift planning failed")
+            return
+        if not self.mover.execute(plan_result.trajectory):
+            self.get_logger().error("Opened-cap lift execution failed")
+            return
+
+        self.get_logger().info("Cap opening and lift completed")
+
+    def _rotate_cap_wrist(
+        self,
+        delta_deg: float,
+        turn: int,
+        phase: str,
+    ) -> bool:
+        """Plan and execute one low-speed relative J2_6 cap motion."""
+        try:
+            plan_result = self.mover.plan_joint_delta(
+                "Arm2",
+                "J2_6",
+                math.radians(delta_deg),
+                planner=Planner.pilz_cap_ptp,
+            )
+        except (ValueError, RuntimeError) as exc:
+            self.get_logger().error(
+                f"Cap turn {turn} {phase} target is invalid: {exc}"
+            )
+            return False
+
+        if plan_result is None:
+            self.get_logger().error(
+                f"Cap turn {turn} {phase} planning failed"
+            )
+            return False
+        if not self.mover.execute(plan_result.trajectory):
+            self.get_logger().error(
+                f"Cap turn {turn} {phase} execution failed"
+            )
+            return False
+        return True
 
     # ------------------------------------------------------------------
     # 检测点 Marker 可视化

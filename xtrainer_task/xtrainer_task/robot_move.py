@@ -8,7 +8,7 @@ via ROS 2 parameters — see launch/start.launch.py for the canonical way.
 """
 
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from geometry_msgs.msg import Pose, PoseStamped
 from moveit.core.robot_state import RobotState
@@ -25,13 +25,22 @@ class Planner(Enum):
     ``config/moveit_cpp.yaml`` used to build ``PlanRequestParameters``.
     """
 
-    ompl = ('ompl', 'RRTConnectkConfigDefault')
-    pilz_ptp = ('pilz_industrial_motion_planner', 'PTP')
-    pilz_lin = ('pilz_industrial_motion_planner', 'LIN')
+    ompl = ('ompl', 'RRTConnectkConfigDefault', 'plan_request_params')
+    pilz_ptp = ('pilz_industrial_motion_planner', 'PTP', 'pilz_ptp')
+    pilz_lin = ('pilz_industrial_motion_planner', 'LIN', 'pilz_lin')
+    pilz_cap_ptp = (
+        'pilz_industrial_motion_planner', 'PTP', 'pilz_cap_ptp'
+    )
 
-    def __init__(self, planning_pipeline: str, planner_id: str):
+    def __init__(
+        self,
+        planning_pipeline: str,
+        planner_id: str,
+        parameter_namespace: str,
+    ):
         self.planning_pipeline = planning_pipeline
         self.planner_id = planner_id
+        self.parameter_namespace = parameter_namespace
 
 
 class RobotMover:
@@ -159,7 +168,7 @@ class RobotMover:
             return pc.plan()
 
         plan_parameters = PlanRequestParameters(
-            self._moveit, planner_cfg.name
+            self._moveit, planner_cfg.parameter_namespace
         )
         return pc.plan(single_plan_parameters=plan_parameters)
 
@@ -224,12 +233,6 @@ class RobotMover:
         pc = self._get_planning_component(arm)
         pc.set_start_state_to_current_state()
 
-        # Apply planner override if non-default
-        planner_cfg = self._resolve_planner(planner)
-        if planner_cfg is not None:
-            pc.planning_pipeline = planner_cfg.planning_pipeline
-            pc.planner_id = planner_cfg.planner_id
-
         # Validate target exists
         named_states = pc.named_target_states
         if target_name not in named_states:
@@ -250,9 +253,9 @@ class RobotMover:
 
         self._logger.info(
             f"[{arm}] planning to named target '{target_name}' "
-            f"(planner={planner_cfg.name if planner_cfg else 'ompl'}) …"
+            f"(planner={planner.name if isinstance(planner, Planner) else planner}) …"
         )
-        plan_result = pc.plan()
+        plan_result = self._plan(pc, planner)
         if not plan_result:
             self._logger.error(
                 f"[{arm}] planning to '{target_name}' failed"
@@ -263,6 +266,74 @@ class RobotMover:
         self._logger.info(f"[{arm}] plan OK ({n_pts} waypoints)")
         self._display_trajectory(plan_result.trajectory)
         return plan_result
+
+    # ------------------------------------------------------------------
+    # Planning — relative single-joint motion
+    # ------------------------------------------------------------------
+
+    def get_current_joint_positions(self, arm: str) -> List[float]:
+        """Return the current active joint positions for *arm* in radians."""
+        group_name = self._ARM_CONFIG[arm]['group_name']
+        with self._planning_scene_monitor.read_only() as scene:
+            positions = scene.current_state.get_joint_group_positions(
+                group_name
+            )
+        return [float(value) for value in positions]
+
+    def plan_joint_delta(
+        self,
+        arm: str,
+        joint_name: str,
+        delta_rad: float,
+        *,
+        planner: Planner | str = Planner.pilz_ptp,
+    ) -> Optional[Any]:
+        """Plan a relative move that changes only one active joint.
+
+        The target is based on the latest PlanningScene joint state. MoveIt
+        validates the resulting target against the planning group's bounds.
+        """
+        group_name = self._ARM_CONFIG[arm]['group_name']
+        joint_group = self._robot_model.get_joint_model_group(group_name)
+        joint_names = list(joint_group.active_joint_model_names)
+
+        if joint_name not in joint_names:
+            raise ValueError(
+                f"Joint '{joint_name}' is not active in {arm}. "
+                f"Valid: {joint_names}"
+            )
+
+        current = self.get_current_joint_positions(arm)
+        if len(current) != len(joint_names):
+            raise RuntimeError(
+                f"[{arm}] expected {len(joint_names)} joint positions, "
+                f"got {len(current)}"
+            )
+
+        target = current.copy()
+        joint_index = joint_names.index(joint_name)
+        target[joint_index] += float(delta_rad)
+
+        bounds = list(joint_group.active_joint_model_bounds)
+        target_bound = bounds[joint_index][0]
+        if (
+            target_bound.position_bounded
+            and not target_bound.min_position
+            <= target[joint_index]
+            <= target_bound.max_position
+        ):
+            raise ValueError(
+                f"[{arm}] {joint_name} target {target[joint_index]:.3f} rad "
+                f"is outside [{target_bound.min_position:.3f}, "
+                f"{target_bound.max_position:.3f}] rad"
+            )
+
+        self._logger.info(
+            f"[{arm}] relative joint move {joint_name}: "
+            f"{current[joint_index]:.3f} + {delta_rad:.3f} = "
+            f"{target[joint_index]:.3f} rad"
+        )
+        return self.plan_joints(arm, target, planner=planner)
 
     # ------------------------------------------------------------------
     # Planning — joint space
