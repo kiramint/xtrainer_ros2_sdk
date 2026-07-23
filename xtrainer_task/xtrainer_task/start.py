@@ -24,7 +24,6 @@ from geometry_msgs.msg import PointStamped, Pose
 from moveit.planning import MoveItPy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
-from scipy.spatial.transform import Rotation
 from sensor_msgs.msg import CameraInfo, Image
 from visualization_msgs.msg import Marker
 
@@ -69,13 +68,9 @@ class XTrainerTask(Node):
         # 夹爪
         self.gripper = GripperController(self)
 
-        # ── 彩色图缓存 (camera_name → latest BGR np.ndarray) ──
-        self._color_frames: Dict[str, np.ndarray] = {}
-        self._color_lock = threading.Lock()
-
-        # ── 深度图缓存 (camera_name → latest aligned depth np.ndarray) ──
-        self._depth_frames: Dict[str, np.ndarray] = {}
-        self._depth_lock = threading.Lock()
+        # ── 各相机最新帧快照 (单锁, 每帧覆盖) ──
+        self._snapshots: Dict[str, dict] = {}
+        self._snapshots_lock = threading.Lock()
 
         # ── 相机内参缓存 (camera_name → CameraInfo) ──
         self._camera_infos: Dict[str, CameraInfo] = {}
@@ -130,152 +125,157 @@ class XTrainerTask(Node):
         self.launch()
 
     def launch(self):
+
+        self.gripper.open_both()
+
         """
         Step 1: Approach
         """
-        image_top = self.get_latest_color("camera_top")
 
-        if image_top is None:
-            self.get_logger().error("No top camera image available.")
-            return
-        
-        result = self.dino.detect(image_top,"bottle")
+        left_arm_z_axis = 0.0
 
-        if len(result.scores) == 0:
-            self.get_logger().error("No bottle detected in top camera.")
-            return
-        
-        annotated_image = self.dino.annotate(image_top,result,draw_mask=True)
-        cv2.imshow("Detection Result", annotated_image)
-        cv2.waitKey(10)
-        
-        mid_x = (result.boxes[0,0]+result.boxes[0,2])/2
-        mid_y = (result.boxes[0,1]+result.boxes[0,3])/2
+        # Panning Loop
+        while rclpy.ok():
+            # Capture Loop
+            while rclpy.ok():
+                image_top = self.get_latest_color("camera_top")
 
-        self.get_logger().info(f"Mid pixel: ({mid_x}, {mid_y})")
-        
-        mid_coordinate = self.pixel_to_base_link("camera_top",mid_x,mid_y)
+                if image_top is None:
+                    self.get_logger().error("No top camera image available.")
+                    continue
 
-        if mid_coordinate is None:
-            self.get_logger().warn("Failed to compute 3D coordinate of bottle center.")
-            return
+                result = self.dino.detect(image_top, "bottle")
 
-        self._publish_detection_marker(mid_coordinate)
+                if len(result.boxes) == 0:
+                    self.get_logger().warn("No bottle detected in top camera.")
+                    cv2.imshow("Detection Result", image_top)
+                    cv2.waitKey(10)
+                    continue
 
-        # rot = Rotation.from_euler('xyz',[0,0,0]).as_quat()
+                try:
+                    annotated_image = self.dino.annotate(image_top, result, draw_mask=True)
+                except Exception:
+                    self.get_logger().warn("Bottle annotate failed, showing original image")
+                    annotated_image = image_top
 
-        # 10cm away from bottle
-        pose_approach = Pose()
-        pose_approach.position.x = mid_coordinate[0] - 0.07
-        pose_approach.position.y = mid_coordinate[1]
-        pose_approach.position.z = mid_coordinate[2]
-        pose_approach.orientation.x = -0.5022768378257751
-        pose_approach.orientation.y = 0.4977162480354309
-        pose_approach.orientation.z = -0.5023228526115417
-        pose_approach.orientation.w = 0.4976627230644226
+                cv2.imshow("Detection Result", annotated_image)
+                cv2.waitKey(10)
 
-        self.get_logger().info(f"############# Move to pose {pose_approach} ###############")
+                break
 
-        # move arm
-        plan_result = self.mover.plan_pose('Arm1',pose_approach,planner=Planner.ompl)
+            mid_x = (result.boxes[0, 0] + result.boxes[0, 2]) / 2
+            mid_y = (result.boxes[0, 1] + result.boxes[0, 3]) / 2
+
+            self.get_logger().info(f"Mid pixel: ({mid_x}, {mid_y})")
+
+            mid_coordinate = self.pixel_to_base_link("camera_top", mid_x, mid_y)
+
+            if mid_coordinate is None:
+                self.get_logger().error("Failed to compute 3D coordinate of bottle center.")
+                continue
+
+            self._publish_detection_marker(mid_coordinate)
+
+            left_arm_z_axis = mid_coordinate[2]
+
+            # 15cm away from bottle
+            pose_approach = Pose()
+            pose_approach.position.x = mid_coordinate[0] - 0.15
+            pose_approach.position.y = mid_coordinate[1]
+            pose_approach.position.z = mid_coordinate[2]
+            pose_approach.orientation.x = -0.5022768378257751
+            pose_approach.orientation.y = 0.4977162480354309
+            pose_approach.orientation.z = -0.5023228526115417
+            pose_approach.orientation.w = 0.4976627230644226
+
+            self.get_logger().info(f"############# Move to pose {pose_approach} ###############")
+
+            # move arm
+            plan_result = self.mover.plan_pose('Arm1', pose_approach, planner=Planner.ompl)
+
+            if plan_result is None:
+                self.get_logger().error("################### Moveit Planning Failed #################")
+                continue
+
+            break
 
         self.mover.execute(plan_result.trajectory)
 
-        return 
+        # 记录运动完成的时间戳，用于 Step 2 等待新帧
+        step1_finish_time = self.get_clock().now()
 
         """
         Step 2: Grasp bottle
         """
-        image_left = self.get_latest_color("camera_left")
-        result = self.dino.detect(image_left,"bottle")
+        # Panning Loop
+        while rclpy.ok():
+            # Capture Loop — 等待 Arm1 移动后 camera_left 的新帧
+            while rclpy.ok():
+                image_left = self.get_latest_color("camera_left",
+                                                   min_stamp=step1_finish_time)
 
-        mid_x = (result.boxes[0]+result.boxes[3])/2
-        mid_y = (result.boxes[1]+result.boxes[4])/2
-        
-        mid_coordinate = self.pixel_to_base_link("camera_left",mid_x,mid_y)
-        
-        rot = Rotation.from_euler('xyz',[0,0,np.radians(-90)])
+                if image_left is None:
+                    self.get_logger().warn(
+                        "Waiting for fresh left camera image after arm movement...",
+                        throttle_duration_sec=2.0,
+                    )
+                    time.sleep(0.1)
+                    continue
 
-        # 10cm away from bottle
-        pose_grasp = Pose()
-        pose_grasp.position.x = mid_coordinate[0]
-        pose_grasp.position.y = mid_coordinate[1]
-        pose_grasp.position.z = mid_coordinate[2]
-        pose_grasp.orientation.x = rot[0]
-        pose_grasp.orientation.y = rot[1]
-        pose_grasp.orientation.z = rot[2]
-        pose_grasp.orientation.w = rot[3]
+                result = self.dino.detect(image_left, "biggest cylinder")
 
-        # move arm
-        self.mover.plan_pose('Arm1',pose_approach,'L1_gripper_tcp',Planner.pilz_ptp)
+                if len(result.boxes) == 0:
+                    self.get_logger().warn("No bottle detected in left camera.")
+                    cv2.imshow("Detection Result", image_top)
+                    cv2.waitKey(10)
+                    continue
 
-        # Grasp bottle
-        self.gripper.set_torque(100) # TODO
-        self.gripper.close("left", speed=1.0)
+                try:
+                    annotated_image = self.dino.annotate(image_left, result, draw_mask=True)
+                except Exception:
+                    self.get_logger().warn("Bottle annotate failed, showing original image")
+                    annotated_image = image_left
 
-        # return # for test
-        """
-        Step 3: Grasp bottle cap
-        """
-        image_top = self.get_latest_color("camera_top")
-        result = self.dino.detect(image_top,"bottle cap")
-        
-        mid_x = (result.boxes[0]+result.boxes[3])/2
-        mid_y = (result.boxes[1]+result.boxes[4])/2
-        
-        mid_coordinate = self.pixel_to_base_link("camera_top",mid_x,mid_y)
+                cv2.imshow("Detection Result", annotated_image)
+                cv2.waitKey(10)
 
-        rot = Rotation.from_euler('xyz',[0,0,np.radians(-90)])
+                break
 
-        # 10cm away from bottle
-        pose_approach = Pose()
-        pose_approach.position.x = mid_coordinate[0] + 0.1
-        pose_approach.position.y = mid_coordinate[1]
-        pose_approach.position.z = mid_coordinate[2]
-        pose_approach.orientation.x = rot[0]
-        pose_approach.orientation.y = rot[1]
-        pose_approach.orientation.z = rot[2]
-        pose_approach.orientation.w = rot[3]
+            mid_x = (result.boxes[0, 0] + result.boxes[0, 2]) / 2
+            mid_y = (result.boxes[0, 1] + result.boxes[0, 3]) / 2
 
-        # move arm
-        self.mover.plan_pose('Arm2',pose_approach,'L1_gripper_tcp',Planner.ompl)
+            self.get_logger().info(f"Mid pixel: ({mid_x}, {mid_y})")
 
-        """
-        Step 4: Grasp bottle cap
-        """
-        image_left = self.get_latest_color("camera_right")
-        result = self.dino.detect(image_left,"white bottle cap")
+            mid_coordinate = self.pixel_to_base_link("camera_left", mid_x, mid_y)
 
-        mid_x = (result.boxes[0]+result.boxes[3])/2
-        mid_y = (result.boxes[1]+result.boxes[4])/2
-        
-        mid_coordinate = self.pixel_to_base_link("camera_right",mid_x,mid_y)
-        
-        rot = Rotation.from_euler('xyz',[0,0,np.radians(-90)])
+            if mid_coordinate is None:
+                self.get_logger().error("Failed to compute 3D coordinate of bottle center.")
+                continue
 
-        # 10cm away from bottle
-        pose_grasp = Pose()
-        pose_grasp.position.x = mid_coordinate[0]
-        pose_grasp.position.y = mid_coordinate[1]
-        pose_grasp.position.z = mid_coordinate[2]
-        pose_grasp.orientation.x = rot[0]
-        pose_grasp.orientation.y = rot[1]
-        pose_grasp.orientation.z = rot[2]
-        pose_grasp.orientation.w = rot[3]
+            self._publish_detection_marker(mid_coordinate)
 
-        # move arm
-        self.mover.plan_pose('Arm2',pose_approach,'L1_gripper_tcp',Planner.pilz_ptp)
+            # 15cm away from bottle
+            pose_approach = Pose()
+            pose_approach.position.x = mid_coordinate[0]
+            pose_approach.position.y = mid_coordinate[1]
+            pose_approach.position.z = left_arm_z_axis
+            pose_approach.orientation.x = -0.5022768378257751
+            pose_approach.orientation.y = 0.4977162480354309
+            pose_approach.orientation.z = -0.5023228526115417
+            pose_approach.orientation.w = 0.4976627230644226
 
-        # Grasp bottle
-        self.gripper.set_torque(100) # TODO
-        self.gripper.close("right", speed=1.0)
+            self.get_logger().info(f"############# Move to pose {pose_approach} ###############")
 
-        """
-        Step 5: Open bottle cap
-        """
+            # move arm
+            plan_result = self.mover.plan_pose('Arm1', pose_approach, planner=Planner.pilz_ptp)
 
-        # TODO:
+            if plan_result is None:
+                self.get_logger().error("################### Moveit Planning Failed #################")
+                continue
 
+            break
+
+        self.mover.execute(plan_result.trajectory)
 
     # ------------------------------------------------------------------
     # 检测点 Marker 可视化
@@ -314,7 +314,7 @@ class XTrainerTask(Node):
     # 彩色回调
     # ------------------------------------------------------------------
     def _color_callback(self, camera_name: str, msg: Image) -> None:
-        """将彩色帧转为 BGR 并缓存到 self._color_frames[camera_name]。"""
+        """将彩色帧转为 BGR 并存入快照。"""
         try:
             color_bgr = self.ros_image_to_cv2(msg)
         except Exception as e:
@@ -323,22 +323,49 @@ class XTrainerTask(Node):
                 throttle_duration_sec=5.0,
             )
             return
-        with self._color_lock:
-            self._color_frames[camera_name] = color_bgr
+        stamp_ns = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
+        with self._snapshots_lock:
+            snap = self._snapshots.setdefault(camera_name, {})
+            snap['color'] = color_bgr
+            snap['stamp_ns'] = stamp_ns
 
     # ------------------------------------------------------------------
     # 彩色查询 API
     # ------------------------------------------------------------------
-    def get_latest_color(self, camera_name: str) -> Optional[np.ndarray]:
-        """返回最近一帧彩色图 (H×W×3 BGR uint8), 无缓存返回 None。"""
-        with self._color_lock:
-            return self._color_frames.get(camera_name)
+    def get_latest_color(
+        self,
+        camera_name: str,
+        min_stamp: Optional[rclpy.time.Time] = None,
+    ) -> Optional[np.ndarray]:
+        """返回最近一帧彩色图 (H×W×3 BGR uint8).
+
+        Parameters
+        ----------
+        camera_name : str
+            相机名.
+        min_stamp : rclpy.time.Time or None
+            若提供，则只返回时间戳晚于此值的帧，否则返回 None（用于等待新帧）。
+
+        Returns
+        -------
+        np.ndarray or None
+            无快照或帧过旧时返回 None.
+        """
+        with self._snapshots_lock:
+            snap = self._snapshots.get(camera_name)
+            if snap is None or 'color' not in snap:
+                return None
+            if min_stamp is not None:
+                min_ns = min_stamp.nanoseconds
+                if snap.get('stamp_ns', 0) < min_ns:
+                    return None
+            return snap['color']
 
     # ------------------------------------------------------------------
     # 深度回调
     # ------------------------------------------------------------------
     def _depth_callback(self, camera_name: str, msg: Image) -> None:
-        """将对齐深度帧缓存到 self._depth_frames[camera_name]。"""
+        """将对齐深度帧存入快照。"""
         try:
             depth = self._ros_depth_to_mm(msg)
         except Exception as e:
@@ -347,8 +374,9 @@ class XTrainerTask(Node):
                 throttle_duration_sec=5.0,
             )
             return
-        with self._depth_lock:
-            self._depth_frames[camera_name] = depth
+        with self._snapshots_lock:
+            snap = self._snapshots.setdefault(camera_name, {})
+            snap['depth'] = depth
 
     # ------------------------------------------------------------------
     # 深度查询 API
@@ -360,7 +388,7 @@ class XTrainerTask(Node):
         v: int,
         window: int = 1,
     ) -> Optional[float]:
-        """查询指定像素位置的对齐深度值 (物理尺度, 毫米)。
+        """查询指定像素位置的最新深度值 (物理尺度, 毫米).
 
         Parameters
         ----------
@@ -375,13 +403,14 @@ class XTrainerTask(Node):
         Returns
         -------
         float or None
-            深度值 (mm), 如果无缓 或无有效值则返回 None.
+            深度值 (mm), 如果无最新帧或无有效值则返回 None.
         """
         u = int(u)
         v = int(v)
 
-        with self._depth_lock:
-            depth = self._depth_frames.get(camera_name)
+        with self._snapshots_lock:
+            snap = self._snapshots.get(camera_name)
+            depth = snap.get('depth') if snap else None
 
         if depth is None:
             self.get_logger().warn(
@@ -408,15 +437,16 @@ class XTrainerTask(Node):
         return float(np.median(valid))
 
     def get_latest_depth(self, camera_name: str) -> Optional[np.ndarray]:
-        """返回最近一帧对齐深度图 (mm, uint16), 无缓存返回 None。"""
-        with self._depth_lock:
-            return self._depth_frames.get(camera_name)
+        """返回最近一帧对齐深度图 (mm, uint16), 无最新帧返回 None."""
+        with self._snapshots_lock:
+            snap = self._snapshots.get(camera_name)
+            return snap.get('depth') if snap else None
 
     # ------------------------------------------------------------------
     # 相机内参回调
     # ------------------------------------------------------------------
     def _camera_info_callback(self, camera_name: str, msg: CameraInfo) -> None:
-        """缓存 camera_info (用于 pixel→3D 反投影)。"""
+        """存入 camera_info 快照 (用于 pixel→3D 反投影)."""
         with self._camera_info_lock:
             self._camera_infos[camera_name] = msg
 
