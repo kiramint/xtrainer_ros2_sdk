@@ -22,6 +22,8 @@ import tf2_geometry_msgs
 import tf2_ros
 from geometry_msgs.msg import PointStamped, Pose
 from moveit.planning import MoveItPy
+from rclpy.callback_groups import (MutuallyExclusiveCallbackGroup,
+                                   ReentrantCallbackGroup)
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import CameraInfo, Image
@@ -40,11 +42,10 @@ _DEPTH_TOPIC_TEMPLATE = "/camera/{name}/aligned_depth_to_color/image_raw"
 
 _CAMERA_NAMES = ("camera_top", "camera_left", "camera_right")
 
-# 相机光学 frame 名称 (TODO: 填入 realsense 实际发布的 TF frame)
 _CAMERA_OPTICAL_FRAMES: Dict[str, str] = {
-    "camera_top": "camera_top_color_frame",      # TODO
-    "camera_left": "camera_left_color_frame",    # TODO
-    "camera_right": "camera_right_color_frame",  # TODO
+    "camera_top": "camera_top_color_frame",
+    "camera_left": "camera_left_color_frame",
+    "camera_right": "camera_right_color_frame",
 }
 
 
@@ -80,6 +81,10 @@ class XTrainerTask(Node):
         self._tf_buffer = tf2_ros.Buffer()
         self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self)
 
+        self._camera_cb_group = ReentrantCallbackGroup()   # 相机回调组，允许并发/独立于 launch
+        self._launch_cb_group = MutuallyExclusiveCallbackGroup()  # launch 定时器单独一组
+
+
         # 为三个相机分别订阅彩色、对齐深度 & 内参话题
         for name in _CAMERA_NAMES:
             color_topic = _COLOR_TOPIC_TEMPLATE.format(name=name)
@@ -87,6 +92,7 @@ class XTrainerTask(Node):
                 Image, color_topic,
                 lambda msg, cam=name: self._color_callback(cam, msg),
                 10,
+                callback_group=self._camera_cb_group,
             )
             self.get_logger().info(f"Subscribed color: {color_topic}")
 
@@ -95,6 +101,7 @@ class XTrainerTask(Node):
                 Image, depth_topic,
                 lambda msg, cam=name: self._depth_callback(cam, msg),
                 10,
+                callback_group=self._camera_cb_group,
             )
             self.get_logger().info(f"Subscribed depth: {depth_topic}")
 
@@ -103,6 +110,7 @@ class XTrainerTask(Node):
                 CameraInfo, info_topic,
                 lambda msg, cam=name: self._camera_info_callback(cam, msg),
                 10,
+                callback_group=self._camera_cb_group,
             )
             self.get_logger().info(f"Subscribed camera_info: {info_topic}")
 
@@ -113,7 +121,11 @@ class XTrainerTask(Node):
         self.get_logger().info('#################### All module initialized ######################')
 
         # Launch Task — 1s 后只执行一次 (Jazzy 已移除 oneshot 参数，回调内 cancel 替代)
-        self._launch_timer = self.create_timer(1.0, self._on_launch_timer)
+        self._launch_timer = self.create_timer(
+            1.0, 
+            self._on_launch_timer,
+            callback_group=self._launch_cb_group
+        )
 
     # ------------------------------------------------------------------
     # Controll Task ####################################################
@@ -142,6 +154,7 @@ class XTrainerTask(Node):
 
                 if image_top is None:
                     self.get_logger().error("No top camera image available.")
+                    time.sleep(0.05)
                     continue
 
                 result = self.dino.detect(image_top, "bottle")
@@ -149,7 +162,8 @@ class XTrainerTask(Node):
                 if len(result.boxes) == 0:
                     self.get_logger().warn("No bottle detected in top camera.")
                     cv2.imshow("Detection Result", image_top)
-                    cv2.waitKey(10)
+                    cv2.waitKey(1)
+                    time.sleep(0.05)
                     continue
 
                 try:
@@ -178,11 +192,11 @@ class XTrainerTask(Node):
 
             left_arm_z_axis = mid_coordinate[2]
 
-            # 15cm away from bottle
+            # 20cm away from bottle, 10 cm lower from top
             pose_approach = Pose()
-            pose_approach.position.x = mid_coordinate[0] - 0.15
+            pose_approach.position.x = mid_coordinate[0] - 0.20 # offset
             pose_approach.position.y = mid_coordinate[1]
-            pose_approach.position.z = mid_coordinate[2]
+            pose_approach.position.z = mid_coordinate[2] - 0.05 # offset
             pose_approach.orientation.x = -0.5022768378257751
             pose_approach.orientation.y = 0.4977162480354309
             pose_approach.orientation.z = -0.5023228526115417
@@ -215,18 +229,15 @@ class XTrainerTask(Node):
                                                    min_stamp=step1_finish_time)
 
                 if image_left is None:
-                    self.get_logger().warn(
-                        "Waiting for fresh left camera image after arm movement...",
-                        throttle_duration_sec=2.0,
-                    )
-                    time.sleep(0.1)
+                    self.get_logger().error("No left camera image available.")
+                    time.sleep(0.05)
                     continue
 
                 result = self.dino.detect(image_left, "biggest cylinder")
 
                 if len(result.boxes) == 0:
                     self.get_logger().warn("No bottle detected in left camera.")
-                    cv2.imshow("Detection Result", image_top)
+                    cv2.imshow("Detection Result", image_left)
                     cv2.waitKey(10)
                     continue
 
@@ -256,9 +267,9 @@ class XTrainerTask(Node):
 
             # 15cm away from bottle
             pose_approach = Pose()
-            pose_approach.position.x = mid_coordinate[0]
+            pose_approach.position.x = mid_coordinate[0] + 0.05 # offset
             pose_approach.position.y = mid_coordinate[1]
-            pose_approach.position.z = left_arm_z_axis
+            pose_approach.position.z = left_arm_z_axis - 0.05
             pose_approach.orientation.x = -0.5022768378257751
             pose_approach.orientation.y = 0.4977162480354309
             pose_approach.orientation.z = -0.5023228526115417
@@ -267,7 +278,7 @@ class XTrainerTask(Node):
             self.get_logger().info(f"############# Move to pose {pose_approach} ###############")
 
             # move arm
-            plan_result = self.mover.plan_pose('Arm1', pose_approach, planner=Planner.pilz_ptp)
+            plan_result = self.mover.plan_pose('Arm1', pose_approach, planner=Planner.pilz_lin)
 
             if plan_result is None:
                 self.get_logger().error("################### Moveit Planning Failed #################")
@@ -276,6 +287,8 @@ class XTrainerTask(Node):
             break
 
         self.mover.execute(plan_result.trajectory)
+
+        self.gripper.close("left")
 
     # ------------------------------------------------------------------
     # 检测点 Marker 可视化

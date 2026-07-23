@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from geometry_msgs.msg import Pose, PoseStamped
 from moveit.core.robot_state import RobotState
-from moveit.planning import MoveItPy
+from moveit.planning import MoveItPy, PlanRequestParameters
 from moveit_msgs.msg import DisplayTrajectory
 from rclpy.node import Node
 
@@ -20,8 +20,9 @@ from rclpy.node import Node
 class Planner(Enum):
     """Supported planner identifiers — pass to any ``plan_*()`` method.
 
-    Each member carries ``planning_pipeline`` and ``planner_id`` to
-    configure ``PlanningComponent`` before calling ``.plan()``.
+    Each member carries ``planning_pipeline`` and ``planner_id`` for
+    documentation. Its enum name also matches a parameter namespace in
+    ``config/moveit_cpp.yaml`` used to build ``PlanRequestParameters``.
     """
 
     ompl = ('ompl', 'RRTConnectkConfigDefault')
@@ -138,10 +139,29 @@ class RobotMover:
         says"), so callers can skip overriding.
         """
         if isinstance(planner, str):
-            planner = Planner(planner)
+            try:
+                planner = Planner[planner]
+            except KeyError as exc:
+                valid = ', '.join(member.name for member in Planner)
+                raise ValueError(
+                    f"Unknown planner '{planner}'. Valid: {valid}"
+                ) from exc
+        if not isinstance(planner, Planner):
+            raise TypeError('planner must be a Planner or planner name string')
         if planner is Planner.ompl:
             return None
         return planner
+
+    def _plan(self, pc: Any, planner: 'Planner | str') -> Any:
+        """Plan with the default config or a named request parameter set."""
+        planner_cfg = self._resolve_planner(planner)
+        if planner_cfg is None:
+            return pc.plan()
+
+        plan_parameters = PlanRequestParameters(
+            self._moveit, planner_cfg.name
+        )
+        return pc.plan(single_plan_parameters=plan_parameters)
 
     def _display_trajectory(self, trajectory):
         msg = DisplayTrajectory()
@@ -171,6 +191,78 @@ class RobotMover:
             f"{pose.position.z:.3f})"
         )
         return pose
+    
+    # ------------------------------------------------------------------
+    # Planning — named target (SRDF group_state)
+    # ------------------------------------------------------------------
+
+    def plan_named(
+        self,
+        arm: str,
+        target_name: str,
+        *,
+        planner: Planner | str = Planner.ompl,
+    ) -> Optional[Any]:
+        """Plan a move for *arm* to a predefined named target in the SRDF.
+
+        Named targets are ``<group_state>`` entries defined in the SRDF
+        under the group corresponding to *arm* (e.g. ``"Home1"`` for Arm1).
+
+        Parameters
+        ----------
+        arm : str
+            ``'Arm1'`` or ``'Arm2'``.
+        target_name : str
+            Name of the ``<group_state>`` in the SRDF (e.g. ``"Home1"``).
+        planner : Planner | str
+            Planner to use (default :attr:`Planner.ompl`).
+
+        Returns
+        -------
+        PlanResult or None
+        """
+        pc = self._get_planning_component(arm)
+        pc.set_start_state_to_current_state()
+
+        # Apply planner override if non-default
+        planner_cfg = self._resolve_planner(planner)
+        if planner_cfg is not None:
+            pc.planning_pipeline = planner_cfg.planning_pipeline
+            pc.planner_id = planner_cfg.planner_id
+
+        # Validate target exists
+        named_states = pc.named_target_states
+        if target_name not in named_states:
+            self._logger.error(
+                f"[{arm}] unknown named target '{target_name}'. "
+                f"Available: {named_states}"
+            )
+            return None
+
+        # Set goal from named target joint values
+        joint_dict = pc.get_named_target_state_values(target_name)
+        import numpy as np
+        joint_values = np.array([joint_dict[jn] for jn in joint_dict])
+        group_name = self._ARM_CONFIG[arm]['group_name']
+        robot_state = RobotState(self._robot_model)
+        robot_state.set_joint_group_positions(group_name, joint_values)
+        pc.set_goal_state(robot_state=robot_state)
+
+        self._logger.info(
+            f"[{arm}] planning to named target '{target_name}' "
+            f"(planner={planner_cfg.name if planner_cfg else 'ompl'}) …"
+        )
+        plan_result = pc.plan()
+        if not plan_result:
+            self._logger.error(
+                f"[{arm}] planning to '{target_name}' failed"
+            )
+            return None
+
+        n_pts = len(plan_result.trajectory)
+        self._logger.info(f"[{arm}] plan OK ({n_pts} waypoints)")
+        self._display_trajectory(plan_result.trajectory)
+        return plan_result
 
     # ------------------------------------------------------------------
     # Planning — joint space
@@ -208,21 +300,18 @@ class RobotMover:
         pc = self._get_planning_component(arm)
         pc.set_start_state_to_current_state()
 
-        # Apply planner override if non-default
-        planner_cfg = self._resolve_planner(planner)
-        if planner_cfg is not None:
-            pc.planning_pipeline = planner_cfg.planning_pipeline
-            pc.planner_id = planner_cfg.planner_id
-
         robot_state = RobotState(self._robot_model)
         robot_state.set_joint_group_positions(group_name, joint_values)
         pc.set_goal_state(robot_state=robot_state)
 
+        planner_name = (
+            planner.name if isinstance(planner, Planner) else planner
+        )
         self._logger.info(
-            f"[{arm}] planning (planner={planner_cfg.name if planner_cfg else 'ompl'}) → "
+            f"[{arm}] planning (planner={planner_name}) → "
             + ", ".join(f"{v:.3f}" for v in joint_values)
         )
-        plan_result = pc.plan()
+        plan_result = self._plan(pc, planner)
         if not plan_result:
             self._logger.error(f"[{arm}] planning failed")
             return None
@@ -270,22 +359,19 @@ class RobotMover:
         pc = self._get_planning_component(arm)
         pc.set_start_state_to_current_state()
 
-        # Apply planner override if non-default
-        planner_cfg = self._resolve_planner(planner)
-        if planner_cfg is not None:
-            pc.planning_pipeline = planner_cfg.planning_pipeline
-            pc.planner_id = planner_cfg.planner_id
-
         pose_stamped = PoseStamped()
         pose_stamped.header.frame_id = frame_id
         pose_stamped.pose = target_pose
         pc.set_goal_state(pose_stamped_msg=pose_stamped, pose_link=tip_link)
 
+        planner_name = (
+            planner.name if isinstance(planner, Planner) else planner
+        )
         self._logger.info(
             f"[{arm}] planning pose target "
-            f"(frame: {frame_id}, planner={planner_cfg.name if planner_cfg else 'ompl'}) …"
+            f"(frame: {frame_id}, planner={planner_name}) …"
         )
-        plan_result = pc.plan()
+        plan_result = self._plan(pc, planner)
         if not plan_result:
             self._logger.error(f"[{arm}] planning failed")
             return None
