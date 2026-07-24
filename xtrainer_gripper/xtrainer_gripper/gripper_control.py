@@ -28,6 +28,7 @@ XTrainer 夹爪控制库
 """
 
 import threading
+import time
 from typing import Optional
 
 import rclpy
@@ -196,15 +197,49 @@ class GripperController:
     #  等待
     # ═══════════════════════════════════════════════════════════════
 
+    def position_reached(
+        self,
+        side: str,
+        target: float,
+        tolerance: float = 0.1,
+    ) -> bool:
+        """判断夹爪是否在目标位置容差范围内。
+
+        Args:
+            side:      ``"left"`` 或 ``"right"``。
+            target:    归一化目标位置，0.0=张开，1.0=闭合。
+            tolerance: 可接受的归一化位置误差。
+        """
+        if side not in self._positions:
+            raise ValueError(f"未知夹爪侧: {side}")
+        target = max(0.0, min(1.0, float(target)))
+        tolerance = max(0.0, min(1.0, float(tolerance)))
+        position = self.read_position(side)
+        return position >= 0.0 and abs(position - target) <= tolerance
+
+    def wait_position(
+        self,
+        side: str,
+        target: float,
+        timeout: float = 10.0,
+        tolerance: float = 0.1,
+    ) -> bool:
+        """阻塞等待夹爪进入目标位置容差范围。"""
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while rclpy.ok() and time.monotonic() < deadline:
+            rclpy.spin_once(self._node, timeout_sec=0.1)
+            if self.position_reached(side, target, tolerance):
+                return True
+        return False
+
     def wait_status(self, side: str, target: str, timeout: float = 10.0) -> bool:
         """阻塞等待直到夹爪到达目标状态
 
         Returns:
             True=到达, False=超时
         """
-        import time
-        start = time.time()
-        while time.time() - start < timeout:
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while rclpy.ok() and time.monotonic() < deadline:
             rclpy.spin_once(self._node, timeout_sec=0.1)
             with self._lock:
                 if self._statuses[side] == target:

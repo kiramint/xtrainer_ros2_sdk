@@ -35,7 +35,7 @@ def generate_launch_description():
             {"right_servo_min_pos": int(right_min)},
             {"right_servo_max_pos": int(right_max)},
             {"publish_rate": 20.0},
-            {"torque_limit": 300},
+            {"torque_limit": 200},
         ],
     )
 

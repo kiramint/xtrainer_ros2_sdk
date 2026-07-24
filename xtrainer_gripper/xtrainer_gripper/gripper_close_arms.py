@@ -6,6 +6,8 @@
     ros2 run xtrainer_gripper gripper_close_arms
     ros2 run xtrainer_gripper gripper_close_arms --ros-args -p gripper_ns:=/gripper
     ros2 run xtrainer_gripper gripper_close_arms --ros-args -p speed:=0.5
+    ros2 run xtrainer_gripper gripper_close_arms --ros-args -p wait:=true
+    ros2 run xtrainer_gripper gripper_close_arms --ros-args -p position_tolerance:=0.15
 """
 
 import time
@@ -23,7 +25,11 @@ class GripperCloseArms(Node):
         super().__init__("gripper_close_arms")
         self.declare_parameter("gripper_ns", "/gripper")
         self.declare_parameter("speed", 1.0)
-        self.declare_parameter("wait", True)
+        self.declare_parameter("wait", False)
+        self.declare_parameter("command_repeats", 3)
+        self.declare_parameter("command_interval", 0.1)
+        self.declare_parameter("timeout", 10.0)
+        self.declare_parameter("position_tolerance", 0.1)
 
 
 def main():
@@ -33,6 +39,14 @@ def main():
     gripper_ns = node.get_parameter("gripper_ns").value
     speed = node.get_parameter("speed").value
     wait = node.get_parameter("wait").value
+    command_repeats = max(
+        1, int(node.get_parameter("command_repeats").value)
+    )
+    command_interval = max(
+        0.0, float(node.get_parameter("command_interval").value)
+    )
+    timeout = node.get_parameter("timeout").value
+    tolerance = node.get_parameter("position_tolerance").value
 
     controller = GripperController(node, gripper_ns)
 
@@ -41,20 +55,39 @@ def main():
         controller.spin_once()
         time.sleep(0.05)
 
-    node.get_logger().info(f"闭合双臂夹爪 (speed={speed})")
-    controller.close_both(speed=speed)
+    node.get_logger().info(
+        f"无条件闭合双臂夹爪 (speed={speed}, repeats={command_repeats})"
+    )
+    for index in range(command_repeats):
+        controller.close_both(speed=speed)
+        controller.spin_once()
+        if index + 1 < command_repeats:
+            time.sleep(command_interval)
 
     if wait:
-        node.get_logger().info("等待到位...")
-        ok_left = controller.wait_status("left", "CLOSED", timeout=10.0)
-        ok_right = controller.wait_status("right", "CLOSED", timeout=10.0)
+        node.get_logger().info(
+            f"等待闭合到位 (position >= {1.0 - tolerance:.2f})..."
+        )
+        ok_left = controller.wait_position(
+            "left", 1.0, timeout=timeout, tolerance=tolerance
+        )
+        ok_right = controller.wait_position(
+            "right", 1.0, timeout=timeout, tolerance=tolerance
+        )
         if ok_left and ok_right:
             node.get_logger().info("双臂夹爪已闭合")
         else:
             node.get_logger().warn(
                 f"超时: left={ok_left}, right={ok_right}, "
-                f"status=({controller.read_status('left')}, {controller.read_status('right')})"
+                f"position=({controller.read_position('left'):.3f}, "
+                f"{controller.read_position('right'):.3f}), "
+                f"status=({controller.read_status('left')}, "
+                f"{controller.read_status('right')})"
             )
+    else:
+        node.get_logger().info(
+            "闭合命令已发送，不等待 CLOSED/MOVING 状态"
+        )
 
     node.destroy_node()
     rclpy.shutdown()
