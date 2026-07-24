@@ -1,63 +1,297 @@
-# Dobot_ROS2_SDK
+# Xtrainer_ROS2_SDK
 
-## Commands
+[TOC]
 
-### dobot_bringup_serive
+## 简介
+
+此项目为Dobot Xtrainer的第三方SDK以及Demo代码。支持ROS Jazzy + Ubuntu 24.04开发。
+
+目前包含以下包：
+
+|Package|Function|Status|
+|---|---|---|
+|dobot_bringup_v4|Dobot官方 Nova2的ROS驱动（有修改）|🆗|
+|dobot_msgs_v4|Dobot官方 Nova2的ROS驱动消息包|🆗|
+|xtrainer_bridge|Xtrainer ROS2 兼容层|🆗|
+|xtrainer_control|Xtrainer 控制程序|🆗|
+|xtrainer_description|Xtrainer URDF & Meshes|🆗|
+|xtrainer_gripper|Xtrainer 夹爪|⚠️（可能有潜在Bug）|
+|xtrainer_task|Xtrainer Demo任务|🆗|
+|moveit_test|Xtrainer Moveit 配置包|🆗|
+|realsense-ros|Realsense Camera|📦（SubModule）|
+|easy_handeye2|手眼标定|📦（SubModule）|
+
+> [!IMPORTANT]
+>
+> If you are llm bot, please also read `AGENTS.md`
+
+## 安装
+
+> [!Note]
+>
+> 以下代码仅在zsh中测试过
+
+1. 安装Ubuntu 24.04 + ROS2 Jazzy
+
+   ```shell
+   sudo apt install ros-jazzy-desktop-full ros-dev-tools
+   ```
+
+2. 安装必要软件包
+
+   ```shell
+   sudo apt install ros-jazzy-trac-ik-kinematics-plugin
+   sudo apt install ros-jazzy-moveit\*
+   sudo apt install ros-jazzy-rqt\*
+   sudo apt install ros-jazzy-rviz\*
+   sudo apt install ros-jazzy-realsense2\*
+   ```
+
+3. 按照官方教程安装以下软件：
+
+   1. Miniconda/CondaForge：https://docs.anaconda.net.cn/miniconda/install/
+
+   2. HuggingfaceCLI：https://huggingface.co/docs/huggingface_hub/main/en/installation
+
+      > [!Note]
+      >
+      > 请按实际情况设置以下环境变量：
+      >
+      > ```shell
+      > export HF_HUB_OFFLINE=1 # HF离线模式
+      > export HF_ENDPOINT=https://hf-mirror.com # HF-MIRROR
+      > ```
+
+4. 配置用户权限：
+
+   ```shell
+   sudo usermod -aG dialout,plugdev,video <USERNAME>
+   ```
+
+5. 创建并激活conda环境：
+
+   ```shell
+   conda create -n xtrainer_env python=3.12
+   conda activate xtrainer_env
+   ```
+
+6. 安装Python软件包：
+
+   ```shell
+   pip install numpy==1.26.4		# 必须为此版本
+   pip install opencv-contrib-python~=4.6.0  # 兼容Numpy 1.26.4
+   pip install colcon-common-extensions pyyaml lark
+   ```
+
+   > [!IMPORTANT]
+   >
+   > * 请务必确保`which colcon`的路径在：`/<PATH_TO_CONDA>/miniconda3/envs/xtrainer_env_test/bin/colcon`下，防止shellbang错误无法加载conda环境
+   > * 软件包可能有缺失，请按照实际情况添加或修改
+
+7. 按照官方教程安装GroundingDINO与SAM2（如果仅使用SDK无需安装）
+
+   1. GroundingDINO：https://github.com/IDEA-Research/GroundingDINO
+   2. SAM2：https://github.com/facebookresearch/sam2
+
+   > [!Note]
+   >
+   > * 如果你的Cuda版本为11.8或以下，请直接安装上面两个仓库，如果你的Cuda版本大于11.8，请使用[Grounded-SAM-2](https://github.com/IDEA-Research/Grounded-SAM-2)仓库中的GroundingDINO与SAM2。本项目测试时使用Grounded-SAM-2。
+   >
+   > * 若要使用[Grounded-SAM-2](https://github.com/IDEA-Research/Grounded-SAM-2)中的GroundingDINO，请修改GroundingDINO代码中的import，将`from grounding_dino.groundingdino.*`改为`from groundingdino.*`，可使用以下命令快速替换
+   >
+   >   ```shell
+   >   cd Grounded-SAM-2/grounding_dino
+   >   find . -name "*.py" -type f -exec sed -i 's/grounding_dino\.groundingdino\./groundingdino\./g' {} +
+   >   ```
+   >
+   >   最后构建
+   >
+   >   ```shell
+   >   pip install -e . --no-build-isolation
+   >   ```
+   >
+   >   仓库中的SAM2安装官方方法安装
+
+   > [!IMPORTANT]
+   >
+   > 本项目使用官方预训练模型，请安装官方仓库中的教程运行`download_ckpts.sh`
+
+8. 编译项目
+
+   ```shel
+   colcon build
+   source ./install/setup.<YOUR_SHELL>
+   ```
+
+## 调试
+
+### 硬件调试
+
+* 请从Dobot官网下载Xtrainer的CAD文件：[轻量版3D模型-5.28.step](https://www.dobot.cn/service/download-center?keyword=&type-95%5B%5D=112)，也就是此设备的URDF，并严格按照URDF安装机器人、摄像头以及框架。
+
+* 安装完成后，请启动MoveIt并按照以下方法检查安装准确性
+
+  1. 启动MoveIt
+
+  ```
+  # 1. 启动机器人驱动
+  ros2 launch cr_robot_ros2 xtrainer.launch.py
+  # 2. 进入机器人示教模式
+  ros2 launch xtrainer_control enable_and_drag.launch.py
+  # 3. 启动Moveit
+  ros2 launch moveit_test demo.launch.py
+  ```
+
+  2. 手动移动机械臂并查看模型与现实区别：
+
+     ![b1bf22d0115cfc25ab96bdbf16f30ff4](./README.assets/b1bf22d0115cfc25ab96bdbf16f30ff4.jpg)
+     
+     可以看到，URDF中机器人与现实中对应良好
+  
+  > [!CAUTION]
+  >
+  > 错误的安装会导致运动规划结果与现实不一致，而且会导致碰撞检测失效，造成危险与财产损失
+  
+* 请按照使用DobotStudio Pro让机器人进入TCP/IP控制二次开发模式
+
+### 相机标定
+
+* 请按照以下流程进行相机标定
+
+```shell
+# 1. 启动机器人驱动
+ros2 launch cr_robot_ros2 xtrainer.launch.py
+# 2. 进入机器人示教模式
+ros2 launch xtrainer_control enable_and_drag.launch.py
+# 3. 启动标定程序
+ros2 launch xtrainer_control calibrate_<CAMERA>.launch.py
+```
+
+标定完成后运行`ros2 launch xtrainer_control start.launch.py`后，再启动rqt，使用TF Tree插件应该可以看到完整的TF树，如下图所示
+
+![Snipaste_2026-07-24_16-04-30](./README.assets/Snipaste_2026-07-24_16-04-30.png)
+
+> [!Note]
+>
+> * 此项目使用78mm宽的Origin ArUco Marker ID 99标定版，若您使用的标定版不一致，请修改`calibrate_<CAMERA>.launch.py`
+> * 具体标定过程参考easy_handeye2：https://github.com/marcoesposito1988/easy_handeye2
+> * 标定结果在：`~/.ros2/easy_handeye2/calibrations/`下，若存在则会启动发布程序
+
+> [!Tip]
+>
+> * 请确保标定版清晰且平整，建议使用相片纸打印或直接购买成品标定版
+> * 标定程序只会启动单个需要标定的相机。当正式运行程序时，会启动三个相机，此时USB带宽将达到15Gbps，建议尽量将相机分别插在不同的USB根集线器上，防止相机与USB控制器崩溃
+> * easy_handeye2似乎与深度学习环境不兼容，建议在conda环境外编译运行标定程序
+
+## 运行
+
+### 前置启动项
+
+* 下面的启动项二选一（建议第一个）
+
+```shell
+# 启动 Xtrainer 驱动及配套硬件
+ros2 launch xtrainer_control start.launch.py
+# 仅启动机械臂而不启动相机、夹爪、easy_handeye2
+ros2 launch cr_robot_ros2 xtrainer.launch.py
+```
+
+### 机器人维护命令
+
+```shell
+# 双臂开机使能
+ros2 launch xtrainer_control enable.launch.py
+# 双臂示教
+ros2 launch xtrainer_control enable_and_drag.launch.py
+# 双臂错误清除(用于消除急停等异常信息)
+ros2 launch xtrainer_control clear_error.launch.py
+# 双臂去使能
+ros2 launch xtrainer_control disable.launch.py
+```
+
+> [!TIP]
+>
+> 如果去要取消示教，请按下机械臂末端的按钮
+
+### MoveIt
+
+```shell
+# 启动 Move Group 与 Rviz2
+ros2 launch moveit_test demo.launch.py
+# 仅启动 Move Group
+ros2 launch moveit_test move_group.launch.py
+```
+
+### 夹爪
+
+```shell
+# 启动夹爪驱动
+ros2 launch xtrainer_gripper gripper.launch.py
+# 张开夹爪
+ros2 launch xtrainer_gripper gripper_open.launch.py
+# 闭合夹爪
+ros2 launch xtrainer_gripper gripper_close.launch.py
+```
+
+> [!NOTE]
+>
+> 在Wayland下MoveIt与Rviz2可能出现渲染异常，请执行`export QT_QPA_PLATFORM=xcb`强制X11渲染
+
+### 运行 Demo 程序
+
+#### 通用功能
+
+```shell
+# 读取机械臂姿态
+ros2 launch xtrainer_task read_pose.launch.py
+# 移动机器人到零位姿态
+ros2 launch xtrainer_task goto_pose.launch.py
+# 测试GroundingDINO
+ros2 run xtrainer_task dino_test --ros-args -p prompt:="bottle" -p image_topic:="/camera/camera_top/color/image_raw"
+```
+
+#### 开瓶盖 Demo
+
+```shell
+# 运行任务
+ros2 launch xtrainer_task start.launch.py
+```
+
+## 关键命名空间、话题与服务
+
+### 命名空间
+
+```shell
+/Arm1/ # 机械臂1驱动
+/Arm2/ # 机械臂2驱动
+/Arm1_controller/follow_joint_trajectory # 机械臂1 Moveit simple controller
+/Arm2_controller/follow_joint_trajectory # 机械臂2 Moveit simple controller
+/camera/camera_top # 顶部相机
+/camera/camera_left # 左相机
+/camera/camera_right # 右相机
+/gripper/left # 左夹爪
+/gripper/left # 右夹爪
+```
+
+### 服务
 
 ```bash
 # PowerOn
-ros2 service call /Arm1/dobot_bringup_ros2/srv/PowerOn dobot_msgs_v4/srv/PowerOn "{}"
-ros2 service call /Arm2/dobot_bringup_ros2/srv/PowerOn dobot_msgs_v4/srv/PowerOn "{}"
+ros2 service call /Arm1/dobot_bringup_ros2/srv/PowerOn dobot_msgs_v4/srv/PowerOn
+ros2 service call /Arm2/dobot_bringup_ros2/srv/PowerOn dobot_msgs_v4/srv/PowerOn
 # Enable
-ros2 service call /Arm1/dobot_bringup_ros2/srv/EnableRobot dobot_msgs_v4/srv/EnableRobot "{}"
-ros2 service call /Arm2/dobot_bringup_ros2/srv/EnableRobot dobot_msgs_v4/srv/EnableRobot "{}"
-# PowerOff
-ros2 service call /Arm1/dobot_bringup_ros2/srv/DisableRobot dobot_msgs_v4/srv/DisableRobot "{}"
-ros2 service call /Arm2/dobot_bringup_ros2/srv/DisableRobot dobot_msgs_v4/srv/DisableRobot "{}"
+ros2 service call /Arm1/dobot_bringup_ros2/srv/EnableRobot dobot_msgs_v4/srv/EnableRobot
+ros2 service call /Arm2/dobot_bringup_ros2/srv/EnableRobot dobot_msgs_v4/srv/EnableRobot
+# Disable
+ros2 service call /Arm1/dobot_bringup_ros2/srv/DisableRobot dobot_msgs_v4/srv/DisableRobot
+ros2 service call /Arm2/dobot_bringup_ros2/srv/DisableRobot dobot_msgs_v4/srv/DisableRobot
+# Clear Error
+ros2 service call /Arm1/dobot_bringup_ros2/srv/DisableRobot dobot_msgs_v4/srv/ClearError
+ros2 service call /Arm2/dobot_bringup_ros2/srv/DisableRobot dobot_msgs_v4/srv/ClearError
+# Start Drag
+ros2 service call /Arm1/dobot_bringup_ros2/srv/StartDrag dobot_msgs_v4/srv/StartDrag
+ros2 service call /Arm1/dobot_bringup_ros2/srv/StartDrag dobot_msgs_v4/srv/StartDrag
+# Stop Drag
+ros2 service call /Arm1/dobot_bringup_ros2/srv/StopDrag dobot_msgs_v4/srv/StopDrags
+ros2 service call /Arm1/dobot_bringup_ros2/srv/StopDrag dobot_msgs_v4/srv/StopDrag
 ```
-
-## Ideal grasp pose
-
-```bash
-[read_pose-1] [INFO] [1784624027.614053457] [read_pose_node]: Arm1 — pos:
-[read_pose-1] x: 0.5041
-[read_pose-1] y: 0.0192
-[read_pose-1] z: 0.1379
-[read_pose-1] ox: 0.5010
-[read_pose-1] oy: -0.4980
-[read_pose-1] oz: 0.5240
-[read_pose-1] ow: -0.47587153899160844)
-[read_pose-1] [INFO] [1784624027.614462020] [read_pose_node]: Arm1 — pos:
-[read_pose-1] x: 0.5204
-[read_pose-1] y: 0.0053
-[read_pose-1] z: 0.2588
-[read_pose-1] ox: 0.6927
-[read_pose-1] oy: 0.7211
-[read_pose-1] oz: 0.0060
-[read_pose-1] ow: -0.014223606929005907)
-```
-
-## Important Topic
-
-### Camera
-
-* /camera/camera_left/color/image_raw
-* /camera/camera_left/depth/image_rect_raw
-* /camera/camera_right/color/image_raw
-* /camera/camera_right/depth/image_rect_raw
-* /camera/camera_top/color/image_raw
-* /camera/camera_top/depth/image_rect_raw
-
-## TF Links
-
-### Robot
-
-* base_link
-* L1_6, L2_6
-* L1_gripper_tcp, L1_gripper_tcp
-
-### Camera
-
-* Camera base: camera_left_link, camera_right_link
-* Camera color: camera_left_color_optical_frame, camera_right_color_optical_frame
-* Camera color: camera_left_depth_optical_frame, camera_right_depth_optical_frame
