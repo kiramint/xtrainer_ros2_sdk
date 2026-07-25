@@ -33,19 +33,19 @@
 
 1. 安装Ubuntu 24.04 + ROS2 Jazzy
 
-   ```shell
-   sudo apt install ros-jazzy-desktop-full ros-dev-tools
-   ```
+```shell
+sudo apt install ros-jazzy-desktop-full ros-dev-tools
+```
 
 2. 安装必要软件包
 
-   ```shell
-   sudo apt install ros-jazzy-trac-ik-kinematics-plugin
-   sudo apt install ros-jazzy-moveit\*
-   sudo apt install ros-jazzy-rqt\*
-   sudo apt install ros-jazzy-rviz\*
-   sudo apt install ros-jazzy-realsense2\*
-   ```
+```shell
+sudo apt install ros-jazzy-trac-ik-kinematics-plugin
+sudo apt install ros-jazzy-moveit\*
+sudo apt install ros-jazzy-rqt\*
+sudo apt install ros-jazzy-rviz\*
+sudo apt install ros-jazzy-realsense2\*
+```
 
 3. 按照官方教程安装以下软件：
 
@@ -53,75 +53,75 @@
 
    2. HuggingfaceCLI：https://huggingface.co/docs/huggingface_hub/main/en/installation
 
-      > [!Note]
-      >
-      > 请按实际情况设置以下环境变量：
-      >
-      > ```shell
-      > export HF_HUB_OFFLINE=1 # HF离线模式
-      > export HF_ENDPOINT=https://hf-mirror.com # HF-MIRROR
-      > ```
+> [!Note]
+>
+> 请按实际情况设置以下环境变量：
+>
+> ```shell
+> export HF_HUB_OFFLINE=1 # HF离线模式
+> export HF_ENDPOINT=https://hf-mirror.com # HF-MIRROR
+> ```
 
 4. 配置用户权限：
 
-   ```shell
-   sudo usermod -aG dialout,plugdev,video <USERNAME>
-   ```
+```shell
+sudo usermod -aG dialout,plugdev,video <USERNAME>
+```
 
 5. 创建并激活conda环境：
 
-   ```shell
-   conda create -n xtrainer_env python=3.12
-   conda activate xtrainer_env
-   ```
+```shell
+conda create -n xtrainer_env python=3.12
+conda activate xtrainer_env
+```
 
 6. 安装Python软件包：
 
-   ```shell
-   pip install numpy==1.26.4		# 必须为此版本
-   pip install opencv-contrib-python~=4.6.0  # 兼容Numpy 1.26.4
-   pip install colcon-common-extensions pyyaml lark
-   ```
+```shell
+pip install numpy==1.26.4		# 必须为此版本
+pip install opencv-contrib-python~=4.6.0  # 兼容Numpy 1.26.4
+pip install colcon-common-extensions pyyaml lark
+```
 
-   > [!IMPORTANT]
-   >
-   > * 请务必确保`which colcon`的路径在：`/<PATH_TO_CONDA>/miniconda3/envs/xtrainer_env_test/bin/colcon`下，防止shellbang错误无法加载conda环境
-   > * 软件包可能有缺失，请按照实际情况添加或修改
+> [!IMPORTANT]
+>
+> * 请务必确保`which colcon`的路径在：`/<PATH_TO_CONDA>/miniconda3/envs/xtrainer_env_test/bin/colcon`下，防止shellbang错误无法加载conda环境
+> * 软件包可能有缺失，请按照实际情况添加或修改
 
 7. 按照官方教程安装GroundingDINO与SAM2（如果仅使用SDK无需安装）
 
    1. GroundingDINO：https://github.com/IDEA-Research/GroundingDINO
    2. SAM2：https://github.com/facebookresearch/sam2
 
-   > [!Note]
-   >
-   > * 如果你的Cuda版本为11.8或以下，请直接安装上面两个仓库，如果你的Cuda版本大于11.8，请使用[Grounded-SAM-2](https://github.com/IDEA-Research/Grounded-SAM-2)仓库中的GroundingDINO与SAM2。本项目测试时使用Grounded-SAM-2。
-   >
-   > * 若要使用[Grounded-SAM-2](https://github.com/IDEA-Research/Grounded-SAM-2)中的GroundingDINO，请修改GroundingDINO代码中的import，将`from grounding_dino.groundingdino.*`改为`from groundingdino.*`，可使用以下命令快速替换
-   >
-   >   ```shell
-   >   cd Grounded-SAM-2/grounding_dino
-   >   find . -name "*.py" -type f -exec sed -i 's/grounding_dino\.groundingdino\./groundingdino\./g' {} +
-   >   ```
-   >
-   >   最后构建
-   >
-   >   ```shell
-   >   pip install -e . --no-build-isolation
-   >   ```
-   >
-   >   仓库中的SAM2安装官方方法安装
+> [!Note]
+>
+> * 如果你的Cuda版本为11.8或以下，请直接安装上面两个仓库，如果你的Cuda版本大于11.8，请使用[Grounded-SAM-2](https://github.com/IDEA-Research/Grounded-SAM-2)仓库中的GroundingDINO与SAM2。本项目测试时使用Grounded-SAM-2。
+>
+> * 若要使用[Grounded-SAM-2](https://github.com/IDEA-Research/Grounded-SAM-2)中的GroundingDINO，请修改GroundingDINO代码中的import，将`from grounding_dino.groundingdino.*`改为`from groundingdino.*`，可使用以下命令快速替换
+>
+>   ```shell
+>   cd Grounded-SAM-2/grounding_dino
+>   find . -name "*.py" -type f -exec sed -i 's/grounding_dino\.groundingdino\./groundingdino\./g' {} +
+>   ```
+>
+>   最后构建
+>
+>   ```shell
+>   pip install -e . --no-build-isolation
+>   ```
+>
+>   仓库中的SAM2安装官方方法安装
 
-   > [!IMPORTANT]
-   >
-   > 本项目使用官方预训练模型，请安装官方仓库中的教程运行`download_ckpts.sh`
+> [!IMPORTANT]
+>
+> 本项目使用官方预训练模型，请安装官方仓库中的教程运行`download_ckpts.sh`
 
 8. 编译项目
 
-   ```shel
-   colcon build
-   source ./install/setup.<YOUR_SHELL>
-   ```
+```shel
+colcon build
+source ./install/setup.<YOUR_SHELL>
+```
 
 ## 调试
 
@@ -133,14 +133,14 @@
 
   1. 启动MoveIt
 
-  ```
-  # 1. 启动机器人驱动
-  ros2 launch cr_robot_ros2 xtrainer.launch.py
-  # 2. 进入机器人示教模式
-  ros2 launch xtrainer_control enable_and_drag.launch.py
-  # 3. 启动Moveit
-  ros2 launch moveit_test demo.launch.py
-  ```
+```
+# 1. 启动机器人驱动
+ros2 launch cr_robot_ros2 xtrainer.launch.py
+# 2. 进入机器人示教模式
+ros2 launch xtrainer_control enable_and_drag.launch.py
+# 3. 启动Moveit
+ros2 launch moveit_test demo.launch.py
+```
 
   2. 手动移动机械臂并查看模型与现实区别：
 
@@ -148,9 +148,9 @@
      
      可以看到，URDF中机器人与现实中对应良好
   
-  > [!CAUTION]
-  >
-  > 错误的安装会导致运动规划结果与现实不一致，而且会导致碰撞检测失效，造成危险与财产损失
+> [!CAUTION]
+>
+> 错误的安装会导致运动规划结果与现实不一致，而且会导致碰撞检测失效，造成危险与财产损失
   
 * 请按照使用DobotStudio Pro让机器人进入TCP/IP控制二次开发模式
 
