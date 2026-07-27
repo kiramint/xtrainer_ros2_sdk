@@ -72,6 +72,23 @@
         <parent link="L1_6"/>
         <child link="L1_gripper_tcp"/>
     </joint>
+    <!-- Temporary grasp tip: 205 mm from the J1_6 wrist frame. -->
+    <link name="L1_gripper_tip">
+        <visual>
+            <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+            <geometry>
+                <sphere radius="0.005"/>
+            </geometry>
+            <material name="blue">
+                <color rgba="0.0 0.3 1.0 1.0"/>
+            </material>
+        </visual>
+    </link>
+    <joint name="J1_gripper_tip" type="fixed">
+        <origin xyz="0 0 0.195" rpy="0. 0. 0."/>
+        <parent link="L1_6"/>
+        <child link="L1_gripper_tip"/>
+    </joint>
     <joint name="J2_1" type="revolute">
         <origin xyz="1.06 0. 0.2234" rpy="0.0 -0.0 -1.5707963"/>
         <parent link="base_link"/>
@@ -143,6 +160,23 @@
         <origin xyz="0 0 0.14568" rpy="0. 0. 0."/>
         <parent link="L2_6"/>
         <child link="L2_gripper_tcp"/>
+    </joint>
+    <!-- Temporary grasp tip: 205 mm from the J2_6 wrist frame. -->
+    <link name="L2_gripper_tip">
+        <visual>
+            <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+            <geometry>
+                <sphere radius="0.005"/>
+            </geometry>
+            <material name="blue">
+                <color rgba="0.0 0.3 1.0 1.0"/>
+            </material>
+        </visual>
+    </link>
+    <joint name="J2_gripper_tip" type="fixed">
+        <origin xyz="0 0 0.195" rpy="0. 0. 0."/>
+        <parent link="L2_6"/>
+        <child link="L2_gripper_tip"/>
     </joint>
     <joint name="J3_1" type="revolute">
         <origin xyz="0.2 -0.575 0.15855" rpy="0. 0. -3.1415854"/>

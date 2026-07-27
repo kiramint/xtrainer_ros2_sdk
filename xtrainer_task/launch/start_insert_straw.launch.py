@@ -12,12 +12,12 @@ execution goals to /ArmX_controller/follow_joint_trajectory at a time.
 
 Prerequisites
 -------------
-    ros2 launch xtrainer_control start.launch.py   (driver + bridge + gripper)
+    ros2 launch xtrainer_control start_open_bottle.launch.py   (driver + bridge + gripper)
 
 Usage
 -----
-    ros2 launch xtrainer_task start.launch.py
-    ros2 launch xtrainer_task start.launch.py use_rviz:=false
+    ros2 launch xtrainer_task start_open_bottle.launch.py
+    ros2 launch xtrainer_task start_open_bottle.launch.py use_rviz:=false
 """
 
 import os
@@ -46,7 +46,7 @@ def generate_launch_description():
     moveit_py_node = Node(
         name="xtrainer_task_moveit",
         package="xtrainer_task",
-        executable="start",
+        executable="start_insert_straw",
         output="screen",
         parameters=[params],
     )

@@ -10,7 +10,8 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        ('share/' + package_name + '/launch', ['launch/start.launch.py']),
+        ('share/' + package_name + '/launch', ['launch/start_open_bottle.launch.py']),
+        ('share/' + package_name + '/launch', ['launch/start_insert_straw.launch.py']),
         ('share/' + package_name + '/launch', ['launch/read_pose.launch.py']),
         ('share/' + package_name + '/launch', ['launch/goto_pose.launch.py']),
         ('share/' + package_name + '/config', ['config/moveit_cpp.yaml',
@@ -29,7 +30,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'start = xtrainer_task.start:main',
+            'start_open_bottle = xtrainer_task.start_open_bottle:main',
+            'start_insert_straw = xtrainer_task.start_insert_straw:main',
             'dino_test = xtrainer_task.dino_test:main',
             'read_pose = xtrainer_task.read_pose:main',
             'goto_pose = xtrainer_task.goto_pose:main',

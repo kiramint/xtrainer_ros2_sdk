@@ -11,7 +11,7 @@
 
 Usage::
 
-    ros2 run xtrainer_task dino_test --ros-args -p prompt:="bottle. cup."
+    ros2 run xtrainer_task dino_test --ros-args -p prompt:="bottle. cup." -p image_topic:="/camera/camera_top/color/image_raw"
 
 默认 prompt 为 "objects."，可通过 ROS 参数动态修改。
 """

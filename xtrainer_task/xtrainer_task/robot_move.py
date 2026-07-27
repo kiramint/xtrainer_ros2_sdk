@@ -79,7 +79,7 @@ class RobotMover:
     _ARM_CONFIG = {
         'Arm1': {
             'group_name': 'Arm1',
-            'tip_link': 'L1_gripper_tcp',
+            'tip_link': 'L1_gripper_tcp',  # backward-compatible default
         },
         'Arm2': {
             'group_name': 'Arm2',
@@ -136,8 +136,16 @@ class RobotMover:
             )
         return self._planning_components[group_name]
 
-    def _get_tip_link(self, arm: str) -> str:
-        return self._ARM_CONFIG[arm]['tip_link']
+    def _get_tip_link(self, arm: str, tip_link: Optional[str] = None) -> str:
+        """Return the configured tip, or an explicitly selected link.
+
+        ``None`` preserves the historical TCP behavior.  The new grasp tips
+        can be selected with ``tip_link='L1_gripper_tip'`` or
+        ``tip_link='L2_gripper_tip'`` on pose-related APIs.
+        """
+        if arm not in self._ARM_CONFIG:
+            raise ValueError(f"Unknown arm '{arm}'")
+        return tip_link or self._ARM_CONFIG[arm]['tip_link']
 
     @staticmethod
     def _resolve_planner(planner: 'Planner | str') -> Optional['Planner']:
@@ -182,17 +190,20 @@ class RobotMover:
     # Pose query
     # ------------------------------------------------------------------
 
-    def get_current_pose(self, arm: str) -> Pose:
+    def get_current_pose(
+        self, arm: str, *, tip_link: Optional[str] = None
+    ) -> Pose:
         """Return the current end-effector pose in the MoveIt world frame.
 
         The returned pose is expressed in the planning frame
         (``base_link``) and represents the position of the tip link
-        (``L1_6`` for Arm1, ``L2_6`` for Arm2).
+        (the configured TCP by default).  Pass ``tip_link`` to query another
+        fixed link, for example ``L1_gripper_tip``.
         """
-        tip_link = self._get_tip_link(arm)
+        selected_tip = self._get_tip_link(arm, tip_link)
         with self._planning_scene_monitor.read_only() as scene:
             robot_state = scene.current_state
-            pose = robot_state.get_pose(tip_link)
+            pose = robot_state.get_pose(selected_tip)
 
         self._logger.debug(
             f"[{arm}] pos=({pose.position.x:.3f}, "
@@ -403,6 +414,7 @@ class RobotMover:
         *,
         frame_id: str = 'base_link',
         planner: Planner | str = Planner.ompl,
+        tip_link: Optional[str] = None,
     ) -> Optional[Any]:
         """Plan a Cartesian move for *arm* to *target_pose*.
 
@@ -426,14 +438,16 @@ class RobotMover:
         -------
         PlanResult or None
         """
-        tip_link = self._get_tip_link(arm)
+        selected_tip = self._get_tip_link(arm, tip_link)
         pc = self._get_planning_component(arm)
         pc.set_start_state_to_current_state()
 
         pose_stamped = PoseStamped()
         pose_stamped.header.frame_id = frame_id
         pose_stamped.pose = target_pose
-        pc.set_goal_state(pose_stamped_msg=pose_stamped, pose_link=tip_link)
+        pc.set_goal_state(
+            pose_stamped_msg=pose_stamped, pose_link=selected_tip
+        )
 
         planner_name = (
             planner.name if isinstance(planner, Planner) else planner
@@ -508,6 +522,7 @@ class RobotMover:
         *,
         frame_id: str = 'base_link',
         planner: Planner | str = Planner.ompl,
+        tip_link: Optional[str] = None,
     ) -> bool:
         """Plan + execute a Cartesian move.
 
@@ -517,7 +532,8 @@ class RobotMover:
             Forwarded to :meth:`plan_pose`.
         """
         plan_result = self.plan_pose(
-            arm, target_pose, frame_id=frame_id, planner=planner
+            arm, target_pose, frame_id=frame_id, planner=planner,
+            tip_link=tip_link,
         )
         if plan_result is None:
             return False

@@ -1,6 +1,6 @@
 # AGENTS.md — XTrainer 项目记忆
 
-> 最后更新: 2026-07-20
+> 最后更新: 2026-07-27
 
 ---
 
@@ -11,7 +11,7 @@ XTrainer 是一个双臂机器人系统，使用 ROS2 Jazzy + Ubuntu24.04 进行
 ### 硬件配置
 
 | 组件 | 数量 | 说明 |
-|------|------|------|
+| ------ | ------ | ------ |
 | Dobot 机械臂 | 4 | Arm1(左)/Arm2(右) 各 2 个一组，型号 **Nova2** |
 | RealSense 相机 | 3 | 头顶(camera_top)、左手(camera_left)、右手(camera_right) |
 | 夹爪 | 2 | 串口伺服夹爪 |
@@ -19,7 +19,7 @@ XTrainer 是一个双臂机器人系统，使用 ROS2 Jazzy + Ubuntu24.04 进行
 ### 软件包结构
 
 | 包名 | 用途 |
-|------|------|
+| ------ | ------ |
 | `dobot_bringup_v4` | 单个机械臂驱动节点 (`cr_robot_ros2_node`) |
 | `xtrainer_bridge` | 双臂桥接: `xtrainer_joint_states` (合并 joint_states) + `xtrainer_controller` (FollowJointTrajectory→ServoJ) |
 | `xtrainer_control` | 顶层启动、标定、机械臂状态控制 |
@@ -39,22 +39,33 @@ XTrainer 是一个双臂机器人系统，使用 ROS2 Jazzy + Ubuntu24.04 进行
 ### Arm1 (左臂)
 
 | 关节 | Link | 说明 |
-|------|------|------|
+| ------ | ------ | ------ |
 | J1_1 ~ J1_6 | L1_1 ~ L1_6 | 6 个旋转关节 |
 | J1_7, J1_8 | L1_7, L1_8 | 2 个 prismatic 关节 (夹爪手指) |
 | J1_gripper_tcp (fixed) | L1_gripper_tcp | 末端 TCP |
+| J1_gripper_tip (fixed) | L1_gripper_tip | 抓取尖端，沿 L1_6 局部 Z 轴 0.195 m |
 
 - 末端 effector frame: `L1_gripper_tcp`
+- 默认 effector frame: `L1_gripper_tcp` (保持兼容)
+- 抓取 tip frame: `L1_gripper_tip` (当前实际长度 19.5 cm)
 
 ### Arm2 (右臂)
 
 | 关节 | Link | 说明 |
-|------|------|------|
+| ------ | ------ | ------ |
 | J2_1 ~ J2_6 | L2_1 ~ L2_6 | 6 个旋转关节 |
 | J2_7, J2_8 | L2_7, L2_8 | 2 个 prismatic 关节 (夹爪手指) |
 | J2_gripper_tcp (fixed) | L2_gripper_tcp | 末端 TCP |
+| J2_gripper_tip (fixed) | L2_gripper_tip | 抓取尖端，沿 L2_6 局部 Z 轴 0.195 m |
 
 - 末端 effector frame: `L2_gripper_tcp`
+- 默认 effector frame: `L2_gripper_tcp` (保持兼容)
+- 抓取 tip frame: `L2_gripper_tip` (当前实际长度 19.5 cm)
+
+> **Tip link 注意**: `L1_gripper_tip` / `L2_gripper_tip` 在
+> `xtrainer_description/urdf/x_trainer.urdf` 中通过 fixed joint 定义，当前
+> `<origin xyz="0 0 0.195"/>`。它们是用于精确抓取定位的临时物理尖端模型，
+> 与原有 TCP 并存，不替换默认 MoveIt effector。
 
 > **注意**: Arm3(J3_*) 和 Arm4(J4_*) 也存在于 URDF 中，但目前未使用。
 
@@ -95,7 +106,7 @@ XTrainer 是一个双臂机器人系统，使用 ROS2 Jazzy + Ubuntu24.04 进行
 ### 标定启动文件
 
 | 文件 | 相机 | 标定类型 | 标定名 | effector |
-|------|------|----------|--------|----------|
+| ------ | ------ | ---------- | -------- | ---------- |
 | `calibrate_top.launch.py` | camera_top | `eye_on_base` | `top_cam_cal` | L1_6 |
 | `calibrate_left.launch.py` | camera_left | `eye_in_hand` | `left_cam_cal` | L1_6 |
 | `calibrate_right.launch.py` | camera_right | `eye_in_hand` | `right_cam_cal` | L2_6 |
@@ -152,7 +163,7 @@ dobot_bringup_v4 ──► /ArmX/joint_states_robot ──► xtrainer_joint_sta
 ### MoveIt 包 (`moveit_test`)
 
 | 文件 | 说明 |
-|------|------|
+| ------ | ------ |
 | `config/moveit_controllers.yaml` | MoveIt controller manager 配置, 指向 `/ArmX_controller/follow_joint_trajectory` |
 | `config/joint_limits.yaml` | 关节速度/加速度限制 (控制 TOTG 时间参数化) |
 | `config/pilz_cartesian_limits.yaml` | Pilz 规划器笛卡尔限制 |
@@ -198,7 +209,7 @@ max_rot_vel: 0.785    # rad/s
 #### URDF 角度限制 (照官方 Nova2 逐关节)
 
 | 关节序号 | 1 | 2 | 3 | 4 | 5 | 6 |
-|---------|---|---|---|---|---|---|
+| --------- | --- | --- | --- | --- | --- | --- |
 | 角度范围 (rad) | ±6.28 | ±3.14 | ±2.79 | ±6.28 | ±6.28 | ±6.28 |
 | (度) | ±360 | ±180 | ±160 | ±360 | ±360 | ±360 |
 
@@ -213,7 +224,7 @@ URDF effort/velocity 全部设为 `0` (=不限制), 清理 SolidWorks 导出垃�
 事件驱动合并双臂 joint_states, 无 timer, rclpy.spin 单线程。
 
 | 参数 | 默认值 | 说明 |
-|------|--------|------|
+| ------ | -------- | ------ |
 | `arm1_joint_names` | ['J1_1'..'J1_6'] | 左臂关节名 |
 | `arm2_joint_names` | ['J2_1'..'J2_6'] | 右臂关节名 |
 | `arm1_joint_state_topic` | /Arm1/joint_states_robot | 左臂状态话题 |
@@ -302,7 +313,7 @@ int32 res
 ### 关键文件
 
 | 文件 | 说明 |
-|------|------|
+| ------ | ------ |
 | `dobot_moveit/dobot_moveit/action_move_server.py` | 官方 FollowJointTrajectory→ServoJ 桥接 (参考实现) |
 | `dobot_moveit/dobot_moveit/joint_states.py` | 官方 joint_states 转发 (单臂 passthrough) |
 | `nova2_moveit/config/*.yaml` | 官方 Nova2 MoveIt 配置 (对比基准) |
@@ -358,7 +369,7 @@ for i, (joint, tfs) in enumerate(points_with_time):
 `xtrainer_control.robot_control` 模块提供以下函数：
 
 | 函数 | 说明 | 参数 |
-|------|------|------|
+| ------ | ------ | ------ |
 | `enable_arm(node, ns)` | 单臂使能 (PowerOn→轮询RobotMode→EnableRobot)，已使能则跳过 | node, arm_namespace, timeout=30s |
 | `disable_arm(node, ns)` | 单臂去使能 (DisableRobot) | node, arm_namespace, timeout=10s |
 | `start_drag(node, ns)` | 单臂拖拽示教开 | node, arm_namespace, timeout=5s |
@@ -369,7 +380,7 @@ for i, (joint, tfs) in enumerate(points_with_time):
 ### 控制 launch 文件
 
 | 文件 | 功能 |
-|------|------|
+| ------ | ------ |
 | `launch/enable.launch.py` | 一键使能双臂 |
 | `launch/disable.launch.py` | 一键去使能双臂 |
 | `launch/enable_and_drag.launch.py` | 一键使能+示教双臂 |
@@ -513,7 +524,7 @@ ros2 run xtrainer_control disable_arms
 ### 关键陷阱
 
 | 陷阱 | 后果 | 对策 |
-|------|------|------|
+| ------ | ------ | ------ |
 | ros2_control + bridge 同名 action server | goal/result 路由错乱 | 移除 ros2_control 或用不同 action 名 |
 | ServoJ 传弧度不传度 | 几乎不动 | bridge 做 `degrees()` 转换 |
 | 本地线性插补 | waypoint 边界速度阶跃 → 卡顿 | 直发 waypoint, 依赖控制器内部插补 |
@@ -579,7 +590,7 @@ ros2 run xtrainer_control disable_arms
 ### 夹爪话题完整清单
 
 | 话题 | 类型 | 方向 | 说明 |
-|------|------|------|------|
+| ------ | ------ | ------ | ------ |
 | `/gripper/left/command` | Float32MultiArray | 订阅 | `[position(0-1), speed(0-1)]` |
 | `/gripper/left/state` | Float32MultiArray | 发布 | `[position(0-1), load(0-1)]` |
 | `/gripper/left/status` | String | 发布 | OPENED/CLOSED/MOVING/ERROR |
@@ -597,7 +608,7 @@ ros2 run xtrainer_control disable_arms
 MoveItPy 是**进程内**规划库，与 move_group 是**平级替代**，不是 client：
 
 | 架构 | 进程 | 需要自己的 config | RViz 支持 |
-|------|------|------|------|
+| ------ | ------ | ------ | ------ |
 | move_group + MoveGroupInterface | 独立进程，暴露 MoveGroup Action | move_group 自己加载 | 完整 MotionPlanning 交互面板 |
 | MoveItPy + PlanningComponent | 进程内库 | 需要 moveit_cpp.yaml + MoveItConfigsBuilder | PlanningSceneDisplay + 手动轨迹发布 |
 
@@ -640,6 +651,10 @@ MoveItPy 是**进程内**规划库，与 move_group 是**平级替代**，不是
 - [x] 新增 `_display_pub` 发布 `/display_planned_path` (DisplayTrajectory)
 - [x] 新增 `_display_trajectory()` 方法：规划成功后自动推送轨迹到 RViz 显示
 - [x] `plan_joints()` / `plan_pose()` 规划成功后自动调用 `_display_trajectory()`
+- [x] `get_current_pose()` / `plan_pose()` / `plan_and_execute_pose()` 支持可选
+  `tip_link` 参数；省略时默认使用 `L1_gripper_tcp` / `L2_gripper_tcp`
+- [x] 新增 tip link 可显式选择，例如：
+  `mover.plan_pose('Arm1', pose, tip_link='L1_gripper_tip')`
 
 ### `xtrainer_task/setup.py` — 注册新文件
 
@@ -671,3 +686,25 @@ MoveItPy 是**进程内**规划库，与 move_group 是**平级替代**，不是
 - [x] 新增 `dummy_joint_names` 参数 (可通过 launch 覆写), 默认包含全部 16 个哑关节
 - [x] `_publish()` 时将哑关节 (全 0 值) 追加到 `/joint_states` 消息, 消除 MoveIt 警告
 - [x] 更新参数表: 新增 `dummy_joint_names` 行
+
+---
+
+## 本次会话修改记录 (2026-07-27)
+
+### `xtrainer_description` — 新增抓取尖端 frame
+
+- [x] 新增 `L1_gripper_tip` / `J1_gripper_tip` fixed joint
+- [x] 新增 `L2_gripper_tip` / `J2_gripper_tip` fixed joint
+- [x] 两个 tip 当前均位于对应 `L*_6` 的局部 Z 轴正方向，距离为
+  `0.195 m` (19.5 cm；以 URDF 当前实际值为准)
+- [x] 原有 `L1_gripper_tcp` / `L2_gripper_tcp` 保留，默认规划行为不变
+
+### `xtrainer_task` — tip link 选择与吸管抓取
+
+- [x] `RobotMover.get_current_pose()`、`plan_pose()` 和
+  `plan_and_execute_pose()` 新增可选 `tip_link` 关键字参数
+- [x] 省略 `tip_link` 时继续使用 TCP，确保既有任务兼容
+- [x] `start_insert_straw.py` Step2 使用 `L1_gripper_tip` 进行抓取点位姿
+  查询和下降规划
+- [x] Step2 使用 DINO/SAM2 mask 主轴 + 深度 + TF 估计吸管三维方向，
+  仅旋转 `J1_6` 后执行抓取

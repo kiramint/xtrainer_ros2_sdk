@@ -1,0 +1,777 @@
+"""Entry point for xtrainer_task — robot movement using MoveIt.
+
+Configs (URDF, SRDF, ompl_planning, etc.) are expected to be loaded
+from ROS 2 parameters, which are set by the launch file:
+    ros2 launch xtrainer_task start.launch.py
+
+Usage
+-----
+    ros2 launch xtrainer_task start.launch.py
+"""
+
+
+import math
+import sys
+import threading
+import time
+from typing import Dict, Optional, Tuple
+
+import cv2
+import numpy as np
+import rclpy
+import tf2_geometry_msgs
+import tf2_ros
+from geometry_msgs.msg import PointStamped, Pose
+from moveit.planning import MoveItPy
+from rclpy.callback_groups import (MutuallyExclusiveCallbackGroup,
+                                   ReentrantCallbackGroup)
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
+from scipy.spatial.transform import Rotation as R
+from sensor_msgs.msg import CameraInfo, Image
+from visualization_msgs.msg import Marker
+
+from xtrainer_gripper.gripper_control import GripperController
+from xtrainer_task.dino_wrapper import DinoWrapper
+from xtrainer_task.robot_move import Planner, RobotMover
+
+_COLOR_ENCODINGS = {"bgr8", "rgb8"}
+_DEPTH_ENCODINGS = {"16UC1", "mono16"}
+
+# 彩色 / 对齐深度话题模板
+_COLOR_TOPIC_TEMPLATE = "/camera/{name}/color/image_raw"
+_DEPTH_TOPIC_TEMPLATE = "/camera/{name}/aligned_depth_to_color/image_raw"
+
+_CAMERA_NAMES = ("camera_top", "camera_left", "camera_right")
+
+_CAP_TURN_DEG = 180.0
+_CAP_TURN_COUNT = 4
+_CAP_GRIPPER_SETTLE_SEC = 1.0
+_CAP_LIFT_DISTANCE_M = 0.05
+
+_STRAW_WRIST_SIGN = 1.0
+_GRIPPER_AXIS_OFFSET_RAD = 0.0
+_GRASP_HEIGHT_OFFSET_M = 0.025
+_GRIPPER_AXIS_LOCAL = np.array([0.1, 0.0, 0.0], dtype=float)
+_STRAW_AXIS_MIN_LENGTH_M = 0.015
+
+_CAMERA_OPTICAL_FRAMES: Dict[str, str] = {
+    "camera_top": "camera_top_color_frame",
+    "camera_left": "camera_left_color_frame",
+    "camera_right": "camera_right_color_frame",
+}
+
+
+class XTrainerTask(Node):
+    def __init__(self):
+        super().__init__("xtrainer_task")
+
+        # MoveItPy reads configs from the parameter server (set by launch file)
+        self._moveit = MoveItPy(node_name='xtrainer_task_moveit')
+        self.mover = RobotMover(self._moveit, self)
+
+        # Give MoveIt some time to receive latest /joint_states and TF
+        self.get_logger().info('Waiting for MoveIt state to populate …')
+        time.sleep(2.0)
+
+        # DINO 检测器
+        self.dino = DinoWrapper(
+            device='cuda', box_threshold=0.35, text_threshold=0.25,
+        )
+
+        # 夹爪
+        self.gripper = GripperController(self)
+
+        # ── 各相机最新帧快照 (单锁, 每帧覆盖) ──
+        self._snapshots: Dict[str, dict] = {}
+        self._snapshots_lock = threading.Lock()
+
+        # ── 相机内参缓存 (camera_name → CameraInfo) ──
+        self._camera_infos: Dict[str, CameraInfo] = {}
+        self._camera_info_lock = threading.Lock()
+
+        # ── TF2 缓冲与监听器 ──
+        self._tf_buffer = tf2_ros.Buffer()
+        self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self)
+
+        self._camera_cb_group = ReentrantCallbackGroup()   # 相机回调组，允许并发/独立于 launch
+        self._launch_cb_group = MutuallyExclusiveCallbackGroup()  # launch 定时器单独一组
+
+
+        # 为三个相机分别订阅彩色、对齐深度 & 内参话题
+        for name in _CAMERA_NAMES:
+            color_topic = _COLOR_TOPIC_TEMPLATE.format(name=name)
+            self.create_subscription(
+                Image, color_topic,
+                lambda msg, cam=name: self._color_callback(cam, msg),
+                10,
+                callback_group=self._camera_cb_group,
+            )
+            self.get_logger().info(f"Subscribed color: {color_topic}")
+
+            depth_topic = _DEPTH_TOPIC_TEMPLATE.format(name=name)
+            self.create_subscription(
+                Image, depth_topic,
+                lambda msg, cam=name: self._depth_callback(cam, msg),
+                10,
+                callback_group=self._camera_cb_group,
+            )
+            self.get_logger().info(f"Subscribed depth: {depth_topic}")
+
+            info_topic = f"/camera/{name}/color/camera_info"
+            self.create_subscription(
+                CameraInfo, info_topic,
+                lambda msg, cam=name: self._camera_info_callback(cam, msg),
+                10,
+                callback_group=self._camera_cb_group,
+            )
+            self.get_logger().info(f"Subscribed camera_info: {info_topic}")
+
+        # ── 检测点 Marker 发布器 (RViz 可视化) ──
+        qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self._marker_pub = self.create_publisher(Marker, '/detection_marker', qos)
+
+        self.get_logger().info('#################### All module initialized ######################')
+
+        # Launch Task — 1s 后只执行一次 (Jazzy 已移除 oneshot 参数，回调内 cancel 替代)
+        self._launch_timer = self.create_timer(
+            1.0, 
+            self._on_launch_timer,
+            callback_group=self._launch_cb_group
+        )
+
+    # ------------------------------------------------------------------
+    # Controll Task ####################################################
+    # ------------------------------------------------------------------
+
+    def _on_launch_timer(self):
+        """One-shot timer callback — cancels timer after first invocation."""
+        self._launch_timer.cancel()
+        self.launch()
+
+    def launch(self):
+
+        self.gripper.open_both()
+
+        """
+        Step 1: Approach
+        """
+
+        # Panning Loop
+        while rclpy.ok():
+            # Capture Loop
+            while rclpy.ok():
+                image_top = self.get_latest_color("camera_top")
+
+                if image_top is None:
+                    self.get_logger().error("No top camera image available.")
+                    time.sleep(0.05)
+                    continue
+
+                result = self.dino.detect(image_top, "straw")
+
+                if len(result.boxes) == 0:
+                    self.get_logger().warn("No straw detected in top camera.")
+                    cv2.imshow("Detection Result", image_top)
+                    cv2.waitKey(1)
+                    time.sleep(0.05)
+                    continue
+
+                try:
+                    annotated_image = self.dino.annotate(image_top, result, draw_mask=True)
+                except Exception:
+                    self.get_logger().warn("Straw annotate failed, showing original image")
+                    annotated_image = image_top
+
+                cv2.imshow("Detection Result", annotated_image)
+                cv2.waitKey(10)
+
+                break
+
+            mid_x = (result.boxes[0, 0] + result.boxes[0, 2]) / 2
+            mid_y = (result.boxes[0, 1] + result.boxes[0, 3]) / 2
+
+            self.get_logger().info(f"Mid pixel: ({mid_x}, {mid_y})")
+
+            mid_coordinate = self.pixel_to_base_link("camera_top", mid_x, mid_y)
+
+            if mid_coordinate is None:
+                self.get_logger().error("Failed to compute 3D coordinate of straw center.")
+                continue
+
+            self._publish_detection_marker(mid_coordinate)
+
+            pose_prepare = Pose()
+            pose_prepare.position.x = mid_coordinate[0]
+            pose_prepare.position.y = mid_coordinate[1]
+            pose_prepare.position.z = mid_coordinate[2] + 0.2
+            pose_prepare.orientation.x = 0.999996542930603
+            pose_prepare.orientation.y = -6.24120730208233e-07
+            pose_prepare.orientation.z = 0.0026403707452118397
+            pose_prepare.orientation.w = 3.604810103752243e-07
+
+            self.get_logger().info(f"############# Move to pose {pose_prepare} ###############")
+
+            # move arm
+            plan_result = self.mover.plan_pose('Arm1', pose_prepare, planner=Planner.ompl)
+
+            if plan_result is None:
+                self.get_logger().error("################### Moveit Planning Failed #################")
+                continue
+
+            break
+
+        self.mover.execute(plan_result.trajectory)
+
+        
+
+        """
+        Step 2: Grasp Straw
+        """
+
+        # Panning Loop
+        while rclpy.ok():
+            # Sub Step1: Capture Loop
+            while rclpy.ok():
+                image_left = self.get_latest_color("camera_left")
+
+                if image_left is None:
+                    self.get_logger().error("No left camera image available.")
+                    time.sleep(0.05)
+                    continue
+
+                result = self.dino.detect(image_left, "pipe")
+
+                if len(result.boxes) == 0:
+                    self.get_logger().warn("No straw detected in top camera.")
+                    cv2.imshow("Detection Result", image_left)
+                    cv2.waitKey(1)
+                    time.sleep(0.05)
+                    continue
+
+                try:
+                    annotated_image = self.dino.annotate(image_left, result, draw_mask=True)
+                except Exception:
+                    self.get_logger().warn("Straw annotate failed, showing original image")
+                    annotated_image = image_left
+
+                cv2.imshow("Detection Result", annotated_image)
+                cv2.waitKey(10)
+
+                break
+
+            # SubStep: 2 Get Axis
+            # 用 SAM2 mask 的主轴取吸管两端，而不是使用 box 对角线。
+            # 对斜拍相机，两个端点各自取深度并经完整 TF 变换到 base_link，
+            # 再计算真实 3D 方向；这避免直接把图像角度当成 J1_6 角度。
+            straw_axis = self._estimate_straw_axis_base(
+                "camera_left", image_left, result
+            )
+            if straw_axis is None:
+                self.get_logger().warn(
+                    "Cannot estimate a valid 3D straw axis; retrying detection."
+                )
+                time.sleep(0.05)
+                continue
+
+            straw_center, straw_direction = straw_axis      # 吸管中心与方向向量
+            straw_direction_xy = np.asarray(straw_direction[:2], dtype=float)   # 提取方向向量的XY平面分量（忽略Z轴）
+            straw_length_xy = float(np.linalg.norm(straw_direction_xy))
+            if straw_length_xy < _STRAW_AXIS_MIN_LENGTH_M:
+                self.get_logger().warn(
+                    "Straw 3D axis has insufficient XY projection; "
+                    "check camera calibration or depth data."
+                )
+                continue
+            straw_direction_xy /= straw_length_xy   # 归一化XY平面方向向量（单位向量）
+
+            # SubStep: 3 Grasp Pose
+            # 夹爪 x 轴（手指开合方向）需垂直吸管，从侧面抓取
+            # → yaw = 吸管角度 + 90°
+            # 轴没有正负方向：θ 与 θ±π 对对称夹爪等价，归一化到 [-π/2, π/2]
+            straw_yaw = math.atan2(straw_direction_xy[1], straw_direction_xy[0])
+            if straw_yaw > math.pi / 2:
+                straw_yaw -= math.pi
+            elif straw_yaw <= -math.pi / 2:
+                straw_yaw += math.pi
+            straw_yaw = _STRAW_WRIST_SIGN * (
+                straw_yaw + _GRIPPER_AXIS_OFFSET_RAD
+            )
+            grasp_yaw = straw_yaw - math.pi / 2
+
+            self.get_logger().info(
+                f"Straw center=({straw_center[0]:.3f}, {straw_center[1]:.3f}, "+
+                f"{straw_center[2]:.3f}), "+
+                f"axis=({straw_direction[0]:.3f}, {straw_direction[1]:.3f}, "+
+                f"{straw_direction[2]:.3f}), "+
+                f"straw yaw={math.degrees(straw_yaw):.1f} deg, "+
+                f"grasp yaw={math.degrees(grasp_yaw):.1f} deg"
+            )
+
+            grasp_tip = "L1_gripper_tip"
+            roll = -np.pi
+            pitch = 0.0
+            yaw = grasp_yaw
+
+            rotation = R.from_euler("xyz",[roll,pitch,yaw])
+            quat = rotation.as_quat()
+
+            grasp_pose = self.mover.get_current_pose(
+                "Arm1", tip_link=grasp_tip
+            )
+            grasp_pose.position.x = straw_center[0]
+            grasp_pose.position.y = straw_center[1]
+            grasp_pose.position.z = straw_center[2]
+            grasp_pose.orientation.x = quat[0]
+            grasp_pose.orientation.y = quat[1]
+            grasp_pose.orientation.z = quat[2]
+            grasp_pose.orientation.w = quat[3]
+
+            plan_grasp = self.mover.plan_pose(
+                "Arm1", grasp_pose, planner=Planner.pilz_ptp,
+                tip_link=grasp_tip,
+            )
+            if plan_grasp is None or not self.mover.execute(plan_grasp.trajectory):
+                self.get_logger().error("Failed to descend to straw for grasping.")
+                continue
+
+            self.gripper.close("left", speed=0.35)
+            # launch() 本身运行在 ROS executor 的 timer callback 中，不能在这里
+            # 调用 GripperController.wait_status()（其内部会再次 spin_once，
+            # 可能触发 executor 的 generator already executing）。先发送命令，
+            # 等待舵机完成；后续循环/主流程可通过 read_status() 异步检查。
+            time.sleep(_CAP_GRIPPER_SETTLE_SEC)
+            status = self.gripper.read_status("left")
+            if status not in ("CLOSED", "MOVING"):
+                self.get_logger().warn(
+                    f"Left gripper status after grasp: {status}; "
+                    "grasp may have failed."
+                )
+            self.get_logger().info("Step 2 completed: straw grasp command sent.")
+            
+            break
+
+        """
+        Step 2: Move to wait pose
+        """
+        while rclpy.ok():
+            wait_pose = self.mover.get_current_pose(
+                            "Arm1", tip_link=grasp_tip
+                        )
+            wait_pose.position.z = wait_pose.position.z + 0.2
+
+            plan_grasp = self.mover.plan_pose(
+                "Arm1", wait_pose, planner=Planner.pilz_ptp,
+            )
+
+            if plan_grasp is None or not self.mover.execute(plan_grasp.trajectory):
+                self.get_logger().error("Failed to move to wait pose.")
+                continue
+
+            break
+            
+
+    @staticmethod
+    def _pose_axis_xy(pose: Pose, local_axis: np.ndarray) -> Optional[np.ndarray]:
+        """将末端局部轴旋转到 base_link，并返回归一化 XY 投影。"""
+        q = pose.orientation
+        x, y, z, w = q.x, q.y, q.z, q.w
+        norm = math.sqrt(x * x + y * y + z * z + w * w)
+        if norm < 1e-9:
+            return None
+        x, y, z, w = x / norm, y / norm, z / norm, w / norm
+        rotation = np.array([
+            [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+        ])
+        axis = rotation @ local_axis    # 将局部轴旋转到base_link坐标系
+        length = float(np.linalg.norm(axis[:2]))
+        if length < 1e-6:
+            return None
+        return axis[:2] / length
+
+    def _estimate_straw_axis_base(
+        self, camera_name: str, image: np.ndarray, result
+    ) -> Optional[Tuple[Tuple[float, float, float], Tuple[float, float, float]]]:
+        """从 mask PCA 选两端点，并将其 3D 坐标转换到 base_link。"""
+        if result.masks is None or len(result.masks) == 0:
+            return None
+        mask = np.asarray(result.masks[0], dtype=bool)
+        ys, xs = np.nonzero(mask)
+        if len(xs) < 20:
+            return None
+        points = np.column_stack((xs.astype(float), ys.astype(float)))
+        _, _, vh = np.linalg.svd(points - points.mean(axis=0), full_matrices=False)
+        principal = vh[0]
+        projection = (points - points.mean(axis=0)) @ principal # 将所有点投影到主方向上，得到一维投影值
+        low = points[np.argmin(projection)]     # 找到投影值最小的点（轴的一端）
+        high = points[np.argmax(projection)]    # 找到投影值最大的点（轴的另一端）
+        p0 = self.pixel_to_base_link(camera_name, int(low[0]), int(low[1]), window=3)
+        p1 = self.pixel_to_base_link(camera_name, int(high[0]), int(high[1]), window=3)
+        if p0 is None or p1 is None:
+            return None
+        direction = np.asarray(p1, dtype=float) - np.asarray(p0, dtype=float) # 计算从p0到p1的方向向量
+        length = float(np.linalg.norm(direction))
+        if length < _STRAW_AXIS_MIN_LENGTH_M:
+            return None
+        center = tuple(((np.asarray(p0) + np.asarray(p1)) / 2.0).tolist())
+        return center, tuple((direction / length).tolist())
+
+    # ------------------------------------------------------------------
+    # 检测点 Marker 可视化
+    # ------------------------------------------------------------------
+    def _publish_detection_marker(
+        self,
+        coordinate: Tuple[float, float, float],
+    ) -> None:
+        """在 RViz 中发布一个红色小球 Marker 标出检测到的 3D 点。"""
+        marker = Marker()
+        marker.header.frame_id = 'base_link'
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.ns = 'detection'
+        marker.id = 0
+        marker.type = Marker.SPHERE
+        marker.action = Marker.ADD
+        marker.pose.position.x = coordinate[0]
+        marker.pose.position.y = coordinate[1]
+        marker.pose.position.z = coordinate[2]
+        marker.pose.orientation.w = 1.0
+        marker.scale.x = 0.03
+        marker.scale.y = 0.03
+        marker.scale.z = 0.03
+        marker.color.r = 1.0
+        marker.color.g = 0.0
+        marker.color.b = 0.0
+        marker.color.a = 1.0
+        marker.lifetime.sec = 0  # 0 = forever
+        self._marker_pub.publish(marker)
+        self.get_logger().info(
+            f"Detection marker published at "
+            f"({coordinate[0]:.4f}, {coordinate[1]:.4f}, {coordinate[2]:.4f})"
+        )
+
+    # ------------------------------------------------------------------
+    # 彩色回调
+    # ------------------------------------------------------------------
+    def _color_callback(self, camera_name: str, msg: Image) -> None:
+        """将彩色帧转为 BGR 并存入快照。"""
+        try:
+            color_bgr = self.ros_image_to_cv2(msg)
+        except Exception as e:
+            self.get_logger().error(
+                f"[{camera_name}] color conversion failed: {e}",
+                throttle_duration_sec=5.0,
+            )
+            return
+        stamp_ns = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
+        with self._snapshots_lock:
+            snap = self._snapshots.setdefault(camera_name, {})
+            snap['color'] = color_bgr
+            snap['stamp_ns'] = stamp_ns
+
+    # ------------------------------------------------------------------
+    # 彩色查询 API
+    # ------------------------------------------------------------------
+    def get_latest_color(
+        self,
+        camera_name: str,
+        min_stamp: Optional[rclpy.time.Time] = None,
+    ) -> Optional[np.ndarray]:
+        """返回最近一帧彩色图 (H×W×3 BGR uint8).
+
+        Parameters
+        ----------
+        camera_name : str
+            相机名.
+        min_stamp : rclpy.time.Time or None
+            若提供，则只返回时间戳晚于此值的帧，否则返回 None（用于等待新帧）。
+
+        Returns
+        -------
+        np.ndarray or None
+            无快照或帧过旧时返回 None.
+        """
+        with self._snapshots_lock:
+            snap = self._snapshots.get(camera_name)
+            if snap is None or 'color' not in snap:
+                return None
+            if min_stamp is not None:
+                min_ns = min_stamp.nanoseconds
+                if snap.get('stamp_ns', 0) < min_ns:
+                    return None
+            return snap['color']
+
+    # ------------------------------------------------------------------
+    # 深度回调
+    # ------------------------------------------------------------------
+    def _depth_callback(self, camera_name: str, msg: Image) -> None:
+        """将对齐深度帧存入快照。"""
+        try:
+            depth = self._ros_depth_to_mm(msg)
+        except Exception as e:
+            self.get_logger().error(
+                f"[{camera_name}] depth conversion failed: {e}",
+                throttle_duration_sec=5.0,
+            )
+            return
+        with self._snapshots_lock:
+            snap = self._snapshots.setdefault(camera_name, {})
+            snap['depth'] = depth
+
+    # ------------------------------------------------------------------
+    # 深度查询 API
+    # ------------------------------------------------------------------
+    def get_depth_at_pixel(
+        self,
+        camera_name: str,
+        u: int,
+        v: int,
+        window: int = 1,
+    ) -> Optional[float]:
+        """查询指定像素位置的最新深度值 (物理尺度, 毫米).
+
+        Parameters
+        ----------
+        camera_name : str
+            相机名, 如 ``"camera_top"``, ``"camera_left"``, ``"camera_right"``.
+        u, v : int
+            像素坐标 (列, 行), 原点为图像左上角.
+        window : int
+            取该窗口内所有有效深度的中位数, 默认为 1 (即单像素).
+            增大窗口可提高抗噪能力, 奇数.
+
+        Returns
+        -------
+        float or None
+            深度值 (mm), 如果无最新帧或无有效值则返回 None.
+        """
+        u = int(u)
+        v = int(v)
+
+        with self._snapshots_lock:
+            snap = self._snapshots.get(camera_name)
+            depth = snap.get('depth') if snap else None
+
+        if depth is None:
+            self.get_logger().warn(
+                f"[{camera_name}] no depth frame available",
+                throttle_duration_sec=2.0,
+            )
+            return None
+
+        h, w = depth.shape
+        half = window // 2
+
+        # 边界裁剪
+        r_min = max(0, v - half)
+        r_max = min(h, v + half + 1)
+        c_min = max(0, u - half)
+        c_max = min(w, u + half + 1)
+
+        patch = depth[r_min:r_max, c_min:c_max]
+        valid = patch[patch > 0]  # 0 = 无效值
+
+        if valid.size == 0:
+            return None
+
+        return float(np.median(valid))
+
+    def get_latest_depth(self, camera_name: str) -> Optional[np.ndarray]:
+        """返回最近一帧对齐深度图 (mm, uint16), 无最新帧返回 None."""
+        with self._snapshots_lock:
+            snap = self._snapshots.get(camera_name)
+            return snap.get('depth') if snap else None
+
+    # ------------------------------------------------------------------
+    # 相机内参回调
+    # ------------------------------------------------------------------
+    def _camera_info_callback(self, camera_name: str, msg: CameraInfo) -> None:
+        """存入 camera_info 快照 (用于 pixel→3D 反投影)."""
+        with self._camera_info_lock:
+            self._camera_infos[camera_name] = msg
+
+    # ------------------------------------------------------------------
+    # 像素 → base_link 3D 坐标转换
+    # ------------------------------------------------------------------
+    def pixel_to_base_link(
+        self,
+        camera_name: str,
+        u: int,
+        v: int,
+        window: int = 1,
+        timeout: float = 0.1,
+    ) -> Optional[Tuple[float, float, float]]:
+        """将深度图上的像素点转换为 ``base_link`` 下的 3D 坐标。
+
+        流程:
+          1. 从缓存的深度图中取像素 (u, v) 的深度 (mm)
+          2. 用相机内参反投影到相机光学坐标系 (m)
+          3. 通过 tf2 变换到 ``base_link``
+
+        Parameters
+        ----------
+        camera_name : str
+            ``"camera_top"`` / ``"camera_left"`` / ``"camera_right"``.
+        u, v : int
+            像素坐标 (列, 行).
+        window : int
+            深度查询的窗口大小, 见 ``get_depth_at_pixel``.
+        timeout : float
+            tf2 lookup 超时 (秒).
+
+        Returns
+        -------
+        tuple (x, y, z) or None
+            ``base_link`` 下的 3D 坐标 (m), 任一环节失败返回 None.
+        """
+        # ── 1. 获取深度 ──────────────────────────────────────
+        depth_mm = self.get_depth_at_pixel(camera_name, u, v, window=window)
+        if depth_mm is None:
+            return None
+        depth_m = depth_mm / 1000.0
+
+        # ── 2. 获取相机内参 ──────────────────────────────────
+        with self._camera_info_lock:
+            info = self._camera_infos.get(camera_name)
+        if info is None:
+            self.get_logger().warn(
+                f"[{camera_name}] no camera_info available",
+                throttle_duration_sec=2.0,
+            )
+            return None
+
+        # ── 3. 反投影: 像素 → 相机光学坐标 (右手系: X右 Y下 Z前) ──
+        fx, fy = info.k[0], info.k[4]
+        cx, cy = info.k[2], info.k[5]
+
+        x_cam = (u - cx) / fx * depth_m
+        y_cam = (v - cy) / fy * depth_m
+        z_cam = depth_m
+
+        # ── 4. tf2 变换到 base_link ──────────────────────────
+        optical_frame = _CAMERA_OPTICAL_FRAMES.get(camera_name)
+        if optical_frame is None:
+            self.get_logger().error(
+                f"[{camera_name}] unknown optical frame — "
+                f"update _CAMERA_OPTICAL_FRAMES",
+                throttle_duration_sec=10.0,
+            )
+            return None
+
+        p_cam = PointStamped()
+        p_cam.header.frame_id = optical_frame
+        p_cam.header.stamp = self.get_clock().now().to_msg()
+        p_cam.point.x = x_cam
+        p_cam.point.y = y_cam
+        p_cam.point.z = z_cam
+
+        try:
+            p_base = self._tf_buffer.transform(
+                p_cam, "base_link",
+                timeout=rclpy.duration.Duration(seconds=timeout),
+            )
+        except (tf2_ros.LookupException, tf2_ros.ConnectivityException,
+                tf2_ros.ExtrapolationException) as e:
+            self.get_logger().warn(
+                f"[{camera_name}] tf lookup failed: {e}",
+                throttle_duration_sec=2.0,
+            )
+            return None
+
+        return (p_base.point.x, p_base.point.y, p_base.point.z)
+
+    # ------------------------------------------------------------------
+    # 图像转换工具
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _ros_depth_to_mm(msg: Image) -> np.ndarray:
+        """将 ``sensor_msgs/Image`` (16UC1) 转为 uint16 深度图 (mm)。"""
+        if msg.encoding not in _DEPTH_ENCODINGS:
+            raise ValueError(
+                f"Unsupported depth encoding: '{msg.encoding}', "
+                f"expected one of {_DEPTH_ENCODINGS}"
+            )
+        expected_step = msg.width * 2
+        if msg.step != expected_step:
+            raise ValueError(
+                f"Unexpected step={msg.step}, expected {expected_step}"
+            )
+        raw = np.frombuffer(msg.data, dtype=np.uint16)
+        return raw.reshape((msg.height, msg.width))
+
+    @staticmethod
+    def ros_image_to_cv2(msg: Image) -> np.ndarray:
+        """将 ``sensor_msgs/Image`` 转换为 OpenCV BGR 图像 (不依赖 cv_bridge)。
+
+        支持 ``bgr8`` 和 ``rgb8`` 编码。
+
+        Parameters
+        ----------
+        msg : Image
+            ROS 图像消息
+
+        Returns
+        -------
+        np.ndarray
+            H×W×3 uint8 BGR 图像
+        """
+        if msg.encoding not in _COLOR_ENCODINGS:
+            raise ValueError(
+                f"Unsupported encoding: '{msg.encoding}', "
+                f"expected one of {_COLOR_ENCODINGS}"
+            )
+        expected_step = msg.width * 3
+        if msg.step != expected_step:
+            raise ValueError(
+                f"Unexpected step={msg.step}, expected {expected_step}"
+            )
+
+        raw = np.frombuffer(msg.data, dtype=np.uint8)
+        frame = raw.reshape((msg.height, msg.width, 3))
+        if msg.encoding == "rgb8":
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        return frame
+
+    # ------------------------------------------------------------------
+    # 位姿读取
+    # ------------------------------------------------------------------
+    def read_current_poses(self) -> Dict[str, Pose]:
+        """读取双臂当前位姿, 返回 ``{"Arm1": Pose, "Arm2": Pose}``。"""
+        poses: Dict[str, Pose] = {}
+        for arm in ("Arm1", "Arm2"):
+            try:
+                pose = self.mover.get_current_pose(arm)
+                p = pose.position
+                q = pose.orientation
+                self.get_logger().info(
+                    f"[{arm}] current pose — "
+                    f"pos: ({p.x:.4f}, {p.y:.4f}, {p.z:.4f}), "
+                    f"ori: ({q.x:.4f}, {q.y:.4f}, {q.z:.4f}, {q.w:.4f})",
+                )
+                poses[arm] = pose
+            except Exception as e:
+                self.get_logger().error(f"[{arm}] failed to read pose: {e}")
+                poses[arm] = Pose()
+        return poses
+
+
+def main():
+    rclpy.init(args=sys.argv)
+
+    node = XTrainerTask()
+
+    executor = rclpy.executors.MultiThreadedExecutor()
+    executor.add_node(node)
+
+    try:
+        executor.spin()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()
