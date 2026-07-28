@@ -931,27 +931,6 @@ class XTrainerTask(Node):
     
         return {"center": center_full, "radius": float(r), "vis_img": vis_img}
 
-
-    @staticmethod
-    def _pose_axis_xy(pose: Pose, local_axis: np.ndarray) -> Optional[np.ndarray]:
-        """将末端局部轴旋转到 base_link，并返回归一化 XY 投影。"""
-        q = pose.orientation
-        x, y, z, w = q.x, q.y, q.z, q.w
-        norm = math.sqrt(x * x + y * y + z * z + w * w)
-        if norm < 1e-9:
-            return None
-        x, y, z, w = x / norm, y / norm, z / norm, w / norm
-        rotation = np.array([
-            [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
-            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
-            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
-        ])
-        axis = rotation @ local_axis    # 将局部轴旋转到base_link坐标系
-        length = float(np.linalg.norm(axis[:2]))
-        if length < 1e-6:
-            return None
-        return axis[:2] / length
-
     def _estimate_straw_axis_base(
         self, camera_name: str, image: np.ndarray, result
     ) -> Optional[Tuple[Tuple[float, float, float], Tuple[float, float, float]]]:
