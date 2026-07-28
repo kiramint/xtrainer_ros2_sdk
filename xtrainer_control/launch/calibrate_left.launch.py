@@ -9,7 +9,9 @@ aruco_single_params = {
         "image_is_rectified": True,
         "marker_id": 99,
         "marker_size": 0.078,
-        "reference_frame": "camera_left_color_optical_frame",
+        "reference_frame": "camera_left_link",
+        # 彩色图像的 PnP 结果位于彩色光学坐标系；aruco_ros 再通过
+        # RealSense 发布的固定 TF 将 marker pose 转到 reference_frame。
         "camera_frame": "camera_left_color_optical_frame",
         "marker_frame": "aruco_marker_left",
         "corner_refinement": "LINES",

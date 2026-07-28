@@ -65,9 +65,9 @@ _GRIPPER_AXIS_LOCAL = np.array([0.1, 0.0, 0.0], dtype=float)
 _STRAW_AXIS_MIN_LENGTH_M = 0.015
 
 _CAMERA_OPTICAL_FRAMES: Dict[str, str] = {
-    "camera_top": "camera_top_color_frame",
-    "camera_left": "camera_left_color_frame",
-    "camera_right": "camera_right_color_frame",
+    "camera_top": "camera_top_color_optical_frame",
+    "camera_left": "camera_left_color_optical_frame",
+    "camera_right": "camera_right_color_optical_frame",
 }
 
 
@@ -534,9 +534,85 @@ class XTrainerTask(Node):
         Step 1: Approach
         """
 
+        # # Panning Loop
+        # while rclpy.ok():
+        #     # Capture Loop
+        #     while rclpy.ok():
+        #         image_top = self.get_latest_color("camera_top")
+
+        #         if image_top is None:
+        #             self.get_logger().error("No top camera image available.")
+        #             time.sleep(0.05)
+        #             continue
+
+        #         with self._dino_lock:
+        #             result = self.dino.detect(image_top, "straw")
+
+        #         if len(result.boxes) == 0:
+        #             self.get_logger().warn("No straw detected in top camera.")
+        #             cv2.imshow("Detection Result", image_top)
+        #             cv2.waitKey(1)
+        #             time.sleep(0.05)
+        #             continue
+
+        #         try:
+        #             annotated_image = self.dino.annotate(image_top, result, draw_mask=True)
+        #         except Exception:
+        #             self.get_logger().warn("Straw annotate failed, showing original image")
+        #             annotated_image = image_top
+
+        #         cv2.imshow("Detection Result", annotated_image)
+        #         cv2.waitKey(10)
+
+        #         break
+
+        #     mid_x = (result.boxes[0, 0] + result.boxes[0, 2]) / 2
+        #     mid_y = (result.boxes[0, 1] + result.boxes[0, 3]) / 2
+
+        #     self.get_logger().info(f"Mid pixel: ({mid_x}, {mid_y})")
+
+        #     mid_coordinate = self.pixel_to_base_link("camera_top", mid_x, mid_y)
+
+        #     if mid_coordinate is None:
+        #         self.get_logger().error("Failed to compute 3D coordinate of straw center.")
+        #         continue
+
+        #     self._publish_detection_marker(mid_coordinate)
+
+        #     pose_prepare = Pose()
+        #     pose_prepare.position.x = mid_coordinate[0]
+        #     pose_prepare.position.y = mid_coordinate[1]
+        #     pose_prepare.position.z = mid_coordinate[2] + 0.3
+        #     pose_prepare.orientation.x = 0.999996542930603
+        #     pose_prepare.orientation.y = -6.24120730208233e-07
+        #     pose_prepare.orientation.z = 0.0026403707452118397
+        #     pose_prepare.orientation.w = 3.604810103752243e-07
+
+        #     self.get_logger().info(f"############# Move to pose {pose_prepare} ###############")
+
+        #     # move arm
+        #     plan_result = self.mover.plan_pose('Arm1', pose_prepare, planner=Planner.ompl)
+
+        #     if plan_result is None:
+        #         self.get_logger().error("################### Moveit Planning Failed #################")
+        #         continue
+
+        #     break
+
+        # self.mover.execute(plan_result.trajectory)
+
+        # # 等待关节状态稳定，避免 Step 1 执行后 MoveIt 内部状态
+        # # 与真实 /joint_states 尚未同步，导致下一步 get_current_pose
+        # # 读到的起点与物理状态偏差超过 allowed_start_tolerance (0.01)。
+        # time.sleep(0.5)
+
+        """
+        Step 2: Grasp Straw
+        """
+
         # Panning Loop
         while rclpy.ok():
-            # Capture Loop
+            # Sub Step1: Capture Loop
             while rclpy.ok():
                 image_top = self.get_latest_color("camera_top")
 
@@ -566,88 +642,12 @@ class XTrainerTask(Node):
 
                 break
 
-            mid_x = (result.boxes[0, 0] + result.boxes[0, 2]) / 2
-            mid_y = (result.boxes[0, 1] + result.boxes[0, 3]) / 2
-
-            self.get_logger().info(f"Mid pixel: ({mid_x}, {mid_y})")
-
-            mid_coordinate = self.pixel_to_base_link("camera_top", mid_x, mid_y)
-
-            if mid_coordinate is None:
-                self.get_logger().error("Failed to compute 3D coordinate of straw center.")
-                continue
-
-            self._publish_detection_marker(mid_coordinate)
-
-            pose_prepare = Pose()
-            pose_prepare.position.x = mid_coordinate[0]
-            pose_prepare.position.y = mid_coordinate[1]
-            pose_prepare.position.z = mid_coordinate[2] + 0.2
-            pose_prepare.orientation.x = 0.999996542930603
-            pose_prepare.orientation.y = -6.24120730208233e-07
-            pose_prepare.orientation.z = 0.0026403707452118397
-            pose_prepare.orientation.w = 3.604810103752243e-07
-
-            self.get_logger().info(f"############# Move to pose {pose_prepare} ###############")
-
-            # move arm
-            plan_result = self.mover.plan_pose('Arm1', pose_prepare, planner=Planner.ompl)
-
-            if plan_result is None:
-                self.get_logger().error("################### Moveit Planning Failed #################")
-                continue
-
-            break
-
-        self.mover.execute(plan_result.trajectory)
-
-        # 等待关节状态稳定，避免 Step 1 执行后 MoveIt 内部状态
-        # 与真实 /joint_states 尚未同步，导致下一步 get_current_pose
-        # 读到的起点与物理状态偏差超过 allowed_start_tolerance (0.01)。
-        time.sleep(0.5)
-
-        """
-        Step 2: Grasp Straw
-        """
-
-        # Panning Loop
-        while rclpy.ok():
-            # Sub Step1: Capture Loop
-            while rclpy.ok():
-                image_left = self.get_latest_color("camera_left")
-
-                if image_left is None:
-                    self.get_logger().error("No left camera image available.")
-                    time.sleep(0.05)
-                    continue
-
-                with self._dino_lock:
-                    result = self.dino.detect(image_left, "white pipe")
-
-                if len(result.boxes) == 0:
-                    self.get_logger().warn("No straw detected in top camera.")
-                    cv2.imshow("Detection Result", image_left)
-                    cv2.waitKey(1)
-                    time.sleep(0.05)
-                    continue
-
-                try:
-                    annotated_image = self.dino.annotate(image_left, result, draw_mask=True)
-                except Exception:
-                    self.get_logger().warn("Straw annotate failed, showing original image")
-                    annotated_image = image_left
-
-                cv2.imshow("Detection Result", annotated_image)
-                cv2.waitKey(10)
-
-                break
-
             # SubStep: 2 Get Axis
             # 用 SAM2 mask 的主轴取吸管两端，而不是使用 box 对角线。
             # 对斜拍相机，两个端点各自取深度并经完整 TF 变换到 base_link，
             # 再计算真实 3D 方向；这避免直接把图像角度当成 J1_6 角度。
             straw_axis = self._estimate_straw_axis_base(
-                "camera_left", image_left, result
+                "camera_top", image_top, result
             )
             if straw_axis is None:
                 self.get_logger().warn(
@@ -701,6 +701,7 @@ class XTrainerTask(Node):
             grasp_pose = self.mover.get_current_pose(
                 "Arm1", tip_link=grasp_tip
             )
+
             grasp_pose.position.x = straw_center[0]
             grasp_pose.position.y = straw_center[1]
             grasp_pose.position.z = straw_center[2]
