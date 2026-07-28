@@ -92,7 +92,7 @@ def generate_launch_description():
                 "name": "right_cam_cal",
                 "robot_base_frame": "base_link",
                 "robot_effector_frame": "L2_6",
-                "tracking_base_frame": "camera_right_color_optical_frame",
+                "tracking_base_frame": "camera_right_link",
                 "tracking_marker_frame": "aruco_marker_right",
             }.items(),
         ),

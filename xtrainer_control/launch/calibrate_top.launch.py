@@ -51,10 +51,10 @@ def generate_launch_description():
             # --- 深度对齐到彩色 (生成对齐的深度图 & 彩色点云) ---
             "align_depth.enable": "true",
             # --- 彩色流分辨率 ---
-                        "rgb_camera.color_profile": "1280x720x15",
-                        "depth_module.depth_profile": "1280x720x15",
-                        "depth_module.color_profile": "1280x720x15",
-                        "depth_module.infra_profile": "1280x720x15",
+            "rgb_camera.color_profile": "1280x720x15",
+            "depth_module.depth_profile": "1280x720x15",
+            "depth_module.color_profile": "1280x720x15",
+            "depth_module.infra_profile": "1280x720x15",
             # --- 深度着色 (将深度图转为彩色便于可视化) ---
             "colorizer.enable": "false",
             # --- TF ---
@@ -97,7 +97,7 @@ def generate_launch_description():
                 "name": "top_cam_cal",
                 "robot_base_frame": "base_link",
                 "robot_effector_frame": "L1_6",
-                "tracking_base_frame": "camera_top_color_optical_frame",
+                "tracking_base_frame": "camera_top_link",
                 "tracking_marker_frame": "aruco_marker_top",
             }.items(),
         ),
