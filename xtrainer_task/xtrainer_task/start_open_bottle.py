@@ -49,9 +49,9 @@ _CAP_GRIPPER_SETTLE_SEC = 1.0
 _CAP_LIFT_DISTANCE_M = 0.05
 
 _CAMERA_OPTICAL_FRAMES: Dict[str, str] = {
-    "camera_top": "camera_top_color_frame",
-    "camera_left": "camera_left_color_frame",
-    "camera_right": "camera_right_color_frame",
+    "camera_top": "camera_top_color_optical_frame",
+    "camera_left": "camera_left_color_optical_frame",
+    "camera_right": "camera_right_color_optical_frame",
 }
 
 
