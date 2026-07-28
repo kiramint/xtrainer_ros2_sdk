@@ -186,6 +186,62 @@ class RobotMover:
         msg.trajectory.append(trajectory.get_robot_trajectory_msg())
         self._display_pub.publish(msg)
 
+    def _log_pose_plan_endpoint(
+        self,
+        arm: str,
+        trajectory: Any,
+        selected_tip: str,
+    ) -> None:
+        """Log final poses of the constrained link and default TCP.
+
+        This diagnostic verifies which fixed link reaches the requested pose.
+        Any introspection failure is logged but does not invalidate the plan.
+        """
+        try:
+            trajectory_msg = trajectory.get_robot_trajectory_msg()
+            joint_trajectory = trajectory_msg.joint_trajectory
+            if not joint_trajectory.points:
+                self._logger.warning(
+                    f"[{arm}] cannot inspect pose endpoint: empty trajectory"
+                )
+                return
+
+            final_by_joint = dict(zip(
+                joint_trajectory.joint_names,
+                joint_trajectory.points[-1].positions,
+            ))
+            group_name = self._ARM_CONFIG[arm]['group_name']
+            joint_group = self._robot_model.get_joint_model_group(group_name)
+            active_joint_names = list(joint_group.active_joint_model_names)
+            if not all(name in final_by_joint for name in active_joint_names):
+                self._logger.warning(
+                    f"[{arm}] cannot inspect pose endpoint: trajectory "
+                    "does not contain every active group joint"
+                )
+                return
+
+            final_state = RobotState(self._robot_model)
+            final_state.set_joint_group_positions(
+                group_name,
+                [final_by_joint[name] for name in active_joint_names],
+            )
+            final_state.update()
+
+            tcp_link = self._ARM_CONFIG[arm]['tip_link']
+            tip_pose = final_state.get_pose(selected_tip)
+            tcp_pose = final_state.get_pose(tcp_link)
+            self._logger.info(
+                f"[{arm}] planned endpoint pose_link='{selected_tip}': "
+                f"tip=({tip_pose.position.x:.4f}, "
+                f"{tip_pose.position.y:.4f}, {tip_pose.position.z:.4f}), "
+                f"tcp[{tcp_link}]=({tcp_pose.position.x:.4f}, "
+                f"{tcp_pose.position.y:.4f}, {tcp_pose.position.z:.4f})"
+            )
+        except Exception as exc:
+            self._logger.warning(
+                f"[{arm}] failed to inspect planned endpoint poses: {exc}"
+            )
+
     # ------------------------------------------------------------------
     # Pose query
     # ------------------------------------------------------------------
@@ -454,7 +510,15 @@ class RobotMover:
         )
         self._logger.info(
             f"[{arm}] planning pose target "
-            f"(frame: {frame_id}, planner={planner_name}) …"
+            f"(frame: {frame_id}, planner={planner_name}, "
+            f"pose_link={selected_tip}) → "
+            f"position=({target_pose.position.x:.4f}, "
+            f"{target_pose.position.y:.4f}, "
+            f"{target_pose.position.z:.4f}), "
+            f"orientation=({target_pose.orientation.x:.4f}, "
+            f"{target_pose.orientation.y:.4f}, "
+            f"{target_pose.orientation.z:.4f}, "
+            f"{target_pose.orientation.w:.4f})"
         )
         plan_result = self._plan(pc, planner)
         if not plan_result:
@@ -463,6 +527,9 @@ class RobotMover:
 
         n_pts = len(plan_result.trajectory)
         self._logger.info(f"[{arm}] plan OK ({n_pts} waypoints)")
+        self._log_pose_plan_endpoint(
+            arm, plan_result.trajectory, selected_tip
+        )
         self._display_trajectory(plan_result.trajectory)
         return plan_result
 

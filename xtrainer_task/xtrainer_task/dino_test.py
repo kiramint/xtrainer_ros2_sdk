@@ -61,6 +61,68 @@ def ros_image_to_cv2(msg: Image) -> np.ndarray:
         frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
     return frame
 
+def get_cap_center_hough(img_bgr, bbox, minRadius=15, maxRadius=70,
+                          param1=50, param2=25, draw=True):
+        """
+        在给定bbox范围内检测圆形瓶盖中心。
+    
+        Args:
+            img_bgr: 原图 (BGR)
+            bbox: (x1, y1, x2, y2)，GroundingDINO等给出的粗定位框
+            minRadius, maxRadius: 圆半径搜索范围（像素），需要根据实际瓶盖尺寸/相机高度标定
+            param1: Canny边缘检测高阈值
+            param2: 累加器阈值，越小越容易检出（也越容易误检），需要调参
+            draw: 是否返回可视化标注图
+    
+        Returns:
+            result: dict，包含:
+                - center: (cx, cy) 原图坐标系下的圆心，若未检测到则为 None
+                - radius: 半径（像素），若未检测到则为 None
+                - vis_img: 标注后的图像（仅当 draw=True 且检测成功时返回，否则为原图副本）
+        """
+        x1, y1, x2, y2 = bbox
+        x1, y1, x2, y2 = int(x1),int(y1),int(x2),int(y2)
+        roi = img_bgr[y1:y2, x1:x2]
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        enhanced = clahe.apply(gray)
+        denoised = cv2.bilateralFilter(enhanced, 9, 75, 75)  # 去噪不是锐化
+    
+        circles = cv2.HoughCircles(
+            denoised, cv2.HOUGH_GRADIENT, dp=1, minDist=50,
+            param1=param1, param2=param2,
+            minRadius=minRadius, maxRadius=maxRadius
+        )
+    
+        vis_img = img_bgr.copy()
+        # 始终画出ROI框，方便调参时确认bbox是否框对了
+        cv2.rectangle(vis_img, (x1, y1), (x2, y2), (255, 0, 0), 1)
+    
+        if circles is None:
+            cv2.putText(vis_img, "NO CIRCLE DETECTED", (x1, y1 - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            return {"center": None, "radius": None, "vis_img": vis_img}
+    
+        # circles[0] 已按累加器得分排序，取第一个作为最佳检测结果
+        cx_roi, cy_roi, r = circles[0][0]
+        center_full = (float(cx_roi + x1), float(cy_roi + y1))
+    
+        if draw:
+            cx_i, cy_i = int(round(center_full[0])), int(round(center_full[1]))
+            r_i = int(round(r))
+            # 圆轮廓
+            cv2.circle(vis_img, (cx_i, cy_i), r_i, (0, 0, 255), 2)
+            # 圆心十字标记
+            cv2.drawMarker(vis_img, (cx_i, cy_i), (0, 255, 255),
+                            cv2.MARKER_CROSS, 20, 2)
+            # 坐标文本标注
+            label = f"({cx_i}, {cy_i})  r={r_i}"
+            cv2.putText(vis_img, label, (cx_i - 60, cy_i - r_i - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+    
+        return {"center": center_full, "radius": float(r), "vis_img": vis_img}
+
 
 class DinoTestNode(Node):
     """ROS2 节点：订阅图像话题 → DinoWrapper 检测 → OpenCV 显示。"""
@@ -139,10 +201,24 @@ class DinoTestNode(Node):
 
         # ── OpenCV 显示 ──────────────────────────────────────
         cv2.imshow("Dino Test", display)
+
+        # Circle Test
+        if len(result.boxes) != 0:
+            bbox = [result.boxes[0, 0],result.boxes[0, 1],result.boxes[0, 2],result.boxes[0, 3]]
+            circle_result = get_cap_center_hough(frame,bbox)
+
+            mid_point = circle_result["center"]
+            annotated_image = circle_result["vis_img"]
+
+            if mid_point is not None and annotated_image is not None:
+                cv2.imshow("Detection Result", annotated_image)
+
         key = cv2.waitKey(1) & 0xFF
         if key == ord("q"):
             self.get_logger().info("User pressed 'q', shutting down …")
             rclpy.shutdown()
+
+        
 
 
 def main():
