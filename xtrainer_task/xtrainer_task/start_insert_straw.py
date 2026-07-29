@@ -63,6 +63,8 @@ _GRIPPER_AXIS_OFFSET_RAD = 0.0
 _GRASP_HEIGHT_OFFSET_M = 0.025
 _GRIPPER_AXIS_LOCAL = np.array([0.1, 0.0, 0.0], dtype=float)
 _STRAW_AXIS_MIN_LENGTH_M = 0.015
+_DEFAULT_INSERTION_DEPTH_M = 0.10
+_MIN_TCP_HEIGHT_ABOVE_CAP_M = 0.05
 
 _CAMERA_OPTICAL_FRAMES: Dict[str, str] = {
     "camera_top": "camera_top_color_optical_frame",
@@ -200,6 +202,15 @@ class CapCenterTracker:
 class XTrainerTask(Node):
     def __init__(self):
         super().__init__("xtrainer_task")
+
+        # 期望吸管进入杯盖以下的长度。实际值会在 Step 5 根据吸管长度和
+        # 夹爪厚度对应的安全高度自动钳制，不会因设定过大而中止任务。
+        self.declare_parameter(
+            "insertion_depth_m", _DEFAULT_INSERTION_DEPTH_M
+        )
+        self._requested_insertion_depth_m = float(
+            self.get_parameter("insertion_depth_m").value
+        )
 
         # MoveItPy reads configs from the parameter server (set by launch file)
         self._moveit = MoveItPy(node_name='xtrainer_task_moveit')
@@ -529,6 +540,7 @@ class XTrainerTask(Node):
     def launch(self):
 
         grasp_tip = "L1_gripper_tip"
+        straw_length_m: Optional[float] = None
 
         self.gripper.open_both()
 
@@ -568,16 +580,24 @@ class XTrainerTask(Node):
 
                 break
 
-            mid_x = (result.boxes[0, 0] + result.boxes[0, 2]) / 2
-            mid_y = (result.boxes[0, 1] + result.boxes[0, 3]) / 2
-
-            self.get_logger().info(f"Mid pixel: ({mid_x}, {mid_y})")
-
-            mid_coordinate = self.pixel_to_base_link("camera_top", mid_x, mid_y)
-
-            if mid_coordinate is None:
-                self.get_logger().error("Failed to compute 3D coordinate of straw center.")
+            # 用 Step 1 顶部相机 mask 主轴两端的 3D 距离测量整根吸管。
+            # Step 2 会夹持此中心，因此后续杯盖以下可用长度为 length / 2。
+            straw_axis_top = self._estimate_straw_axis_base(
+                "camera_top", image_top, result
+            )
+            if straw_axis_top is None:
+                self.get_logger().warn(
+                    "Cannot measure straw length from the top camera; "
+                    "retrying detection."
+                )
                 continue
+
+            mid_coordinate, _, straw_length_m = straw_axis_top
+            self.get_logger().info(
+                "Step 1 measured straw: "
+                f"center=({mid_coordinate[0]:.4f}, {mid_coordinate[1]:.4f}, "
+                f"{mid_coordinate[2]:.4f}) m, length={straw_length_m:.4f} m"
+            )
 
             self._publish_detection_marker(mid_coordinate)
 
@@ -658,7 +678,16 @@ class XTrainerTask(Node):
                 time.sleep(0.05)
                 continue
 
-            straw_center, straw_direction = straw_axis      # 吸管中心与方向向量
+            straw_center, straw_direction, step2_straw_length_m = straw_axis
+            # Step 1 顶部相机无遮挡，长度结果用于插入计算；Step 2 测量值
+            # 仅用于诊断两次测量是否存在较大偏差。
+            length_delta_m = abs(step2_straw_length_m - straw_length_m)
+            if length_delta_m > 0.02:
+                self.get_logger().warn(
+                    "Straw length measurements differ by "
+                    f"{length_delta_m:.3f} m (Step1={straw_length_m:.3f} m, "
+                    f"Step2={step2_straw_length_m:.3f} m); using Step 1."
+                )
             straw_direction_xy = np.asarray(straw_direction[:2], dtype=float)   # 提取方向向量的XY平面分量（忽略Z轴）
             straw_length_xy = float(np.linalg.norm(straw_direction_xy))
             if straw_length_xy < _STRAW_AXIS_MIN_LENGTH_M:
@@ -844,9 +873,11 @@ class XTrainerTask(Node):
                 return
 
             self._publish_detection_marker(cap_3d)
+            cap_height_m = float(cap_3d[2])
             self.get_logger().info(
                 f"Cap center in base_link: ({cap_3d[0]:.4f}, "
-                f"{cap_3d[1]:.4f}, {cap_3d[2]:.4f})"
+                f"{cap_3d[1]:.4f}, {cap_height_m:.4f}); "
+                f"cap height={cap_height_m:.4f} m"
             )
 
             insert_pose = Pose()
@@ -873,13 +904,44 @@ class XTrainerTask(Node):
         Step 5: Stick into it
         """
 
+        # Step 2 夹持吸管中心，因此夹持点到吸管下端为半根吸管长度。
+        # 若期望插入 d，则夹持点目标高度为 cap_z + length/2 - d。
+        # 为补偿夹爪厚度，夹持 TCP 必须至少高出杯盖 5 cm；等价于实际
+        # 插入深度最大为 length/2 - 5 cm。超限时静默采用最大安全值。
+        actual_insertion_depth_m, stick_tcp_z_m = self._compute_insert_target(
+            requested_depth_m=self._requested_insertion_depth_m,
+            straw_length_m=straw_length_m,
+            cap_height_m=cap_height_m,
+            min_tcp_clearance_m=_MIN_TCP_HEIGHT_ABOVE_CAP_M,
+        )
+        if not math.isclose(
+            actual_insertion_depth_m,
+            self._requested_insertion_depth_m,
+            abs_tol=1e-6,
+        ):
+            self.get_logger().warn(
+                "Requested insertion depth was clamped for safety: "
+                f"requested={self._requested_insertion_depth_m:.4f} m, "
+                f"actual={actual_insertion_depth_m:.4f} m"
+            )
+        self.get_logger().info(
+            "Step 5 insertion geometry: "
+            f"straw_length={straw_length_m:.4f} m, "
+            f"cap_height={cap_height_m:.4f} m, "
+            f"insertion_depth={actual_insertion_depth_m:.4f} m, "
+            f"tcp_target_z={stick_tcp_z_m:.4f} m"
+        )
+
         while rclpy.ok():
-            stick_pose = insert_pose
-            stick_pose.position.z = cap_3d[2] + 0.05
+            stick_pose = Pose()
+            stick_pose.position.x = insert_pose.position.x
+            stick_pose.position.y = insert_pose.position.y
+            stick_pose.position.z = stick_tcp_z_m
+            stick_pose.orientation = insert_pose.orientation
 
             grasp_tip = "L1_gripper_tip"
             plan_insert = self.mover.plan_pose(
-                "Arm1", insert_pose, planner=Planner.pilz_ptp, tip_link=grasp_tip,
+                "Arm1", stick_pose, planner=Planner.pilz_lin, tip_link=grasp_tip,
             )
 
             if plan_insert is None or not self.mover.execute(plan_insert.trajectory):
@@ -889,6 +951,16 @@ class XTrainerTask(Node):
             break
 
         self.gripper.open_both()
+
+        """
+        Step 5: Go Home
+        """
+
+        plan_result_1 = self.mover.plan_named("Arm1","Home1")
+        if plan_result_1 is not None:
+            self.mover.execute(plan_result_1.trajectory)
+        
+        time.sleep(1.0)
 
 
 
@@ -957,8 +1029,14 @@ class XTrainerTask(Node):
 
     def _estimate_straw_axis_base(
         self, camera_name: str, image: np.ndarray, result
-    ) -> Optional[Tuple[Tuple[float, float, float], Tuple[float, float, float]]]:
-        """从 mask PCA 选两端点，并将其 3D 坐标转换到 base_link。"""
+    ) -> Optional[
+        Tuple[
+            Tuple[float, float, float],
+            Tuple[float, float, float],
+            float,
+        ]
+    ]:
+        """从 mask PCA 选两端点，返回 base_link 下中心、单位方向和长度。"""
         if result.masks is None or len(result.masks) == 0:
             return None
         mask = np.asarray(result.masks[0], dtype=bool)
@@ -980,7 +1058,30 @@ class XTrainerTask(Node):
         if length < _STRAW_AXIS_MIN_LENGTH_M:
             return None
         center = self.pixel_to_base_link(camera_name, int((low[0]+high[0])/2), int((low[1]+high[1])/2), window=3)
-        return center, tuple((direction / length).tolist())
+        if center is None:
+            center = tuple(
+                ((np.asarray(p0, dtype=float) + np.asarray(p1, dtype=float)) / 2.0).tolist()
+            )
+        return center, tuple((direction / length).tolist()), length
+
+    @staticmethod
+    def _compute_insert_target(
+        requested_depth_m: float,
+        straw_length_m: float,
+        cap_height_m: float,
+        min_tcp_clearance_m: float = _MIN_TCP_HEIGHT_ABOVE_CAP_M,
+    ) -> Tuple[float, float]:
+        """计算实际插入深度和夹持 TCP 高度，并应用机械安全限制。"""
+        half_straw_m = max(0.0, float(straw_length_m) / 2.0)
+        clearance_m = max(0.0, float(min_tcp_clearance_m))
+        max_insertion_m = max(0.0, half_straw_m - clearance_m)
+        requested_m = max(0.0, float(requested_depth_m))
+        actual_depth_m = min(requested_m, max_insertion_m)
+        tcp_target_z_m = max(
+            float(cap_height_m) + half_straw_m - actual_depth_m,
+            float(cap_height_m) + clearance_m,
+        )
+        return actual_depth_m, tcp_target_z_m
 
     # ------------------------------------------------------------------
     # 检测点 Marker 可视化

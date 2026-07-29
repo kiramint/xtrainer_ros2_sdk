@@ -28,6 +28,7 @@ from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from moveit_configs_utils import MoveItConfigsBuilder
 
 
@@ -43,12 +44,29 @@ def generate_launch_description():
 
     params = moveit_config.to_dict()
 
+    insertion_depth_arg = DeclareLaunchArgument(
+        "insertion_depth_m",
+        default_value="0.10",
+        description=(
+            "Requested straw insertion depth below the cap in meters; "
+            "automatically clamped to keep the grasp TCP at least 5 cm "
+            "above the cap"
+        ),
+    )
+
     moveit_py_node = Node(
         name="xtrainer_task_moveit",
         package="xtrainer_task",
         executable="start_insert_straw",
         output="screen",
-        parameters=[params],
+        parameters=[
+            params,
+            {
+                "insertion_depth_m": ParameterValue(
+                    LaunchConfiguration("insertion_depth_m"), value_type=float
+                )
+            },
+        ],
     )
 
     rviz_arg = DeclareLaunchArgument(
@@ -78,6 +96,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         rviz_arg,
+        insertion_depth_arg,
         moveit_py_node,
         rviz_node,
     ])
