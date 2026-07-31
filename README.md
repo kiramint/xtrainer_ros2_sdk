@@ -45,6 +45,7 @@ sudo apt install ros-jazzy-moveit\*
 sudo apt install ros-jazzy-rqt\*
 sudo apt install ros-jazzy-rviz\*
 sudo apt install ros-jazzy-realsense2\*
+sudo apt install ros-jazzy-aruco\*
 ```
 
 3. 按照官方教程安装以下软件：
@@ -78,9 +79,19 @@ conda activate xtrainer_env
 6. 安装Python软件包：
 
 ```shell
+# ROS2
+pip install colcon-common-extensions pyyaml lark
+# Basic library (Same version as ubuntu)
 pip install numpy==1.26.4		# 必须为此版本
 pip install opencv-contrib-python~=4.6.0  # 兼容Numpy 1.26.4
-pip install colcon-common-extensions pyyaml lark
+# GroundingDINO & SAM2
+pip install supervision==0.29.1 transformers==4.44.2 yapf==0.43.0 pycocotools==2.0.11 timm==1.0.28
+# GraspNet
+pip install scipy==1.18.0
+pip install open3d==0.19.0
+pip install scikit-learn==1.9.0
+pip install matplotlib==3.11.1
+
 ```
 
 > [!IMPORTANT]
@@ -90,31 +101,44 @@ pip install colcon-common-extensions pyyaml lark
 
 7. 按照官方教程安装GroundingDINO与SAM2（如果仅使用SDK无需安装）
 
-   1. GroundingDINO：https://github.com/IDEA-Research/GroundingDINO
-   2. SAM2：https://github.com/facebookresearch/sam2
+   1. Pytorch: https://pytorch.org/get-started/locally/ (建议安装2.13.0， CUDA12.6)
+   2. GroundingDINO：https://github.com/IDEA-Research/GroundingDINO
+   3. SAM2：https://github.com/facebookresearch/sam2
+   4. 安装GraspNet：https://github.com/graspnet/graspnet-baseline
+
+> [!important]
+>
+> 实际上，以上几个库按照官方教程安装都十分困难，本教材采用如下安装方式：
+>
+> * GroundingDINO&SAM2:
+>
+>     * 如果你的Cuda版本为11.8或以下，可以直接安装上面两个仓库，如果你的Cuda版本大于11.8，请使用[Grounded-SAM-2](https://github.com/IDEA-Research/Grounded-SAM-2)仓库中的GroundingDINO与SAM2。本项目测试时使用Grounded-SAM-2。
+>
+>     * 若要使用[Grounded-SAM-2](https://github.com/IDEA-Research/Grounded-SAM-2)中的GroundingDINO，请修改GroundingDINO代码中的import，将`from grounding_dino.groundingdino.*`改为`from groundingdino.*`，可使用以下命令快速替换
+>
+>
+>     ```shell
+>     cd Grounded-SAM-2/grounding_dino
+>     find . -name "*.py" -type f -exec sed -i 's/grounding_dino\.groundingdino\./groundingdino\./g' {} +
+>     ```
+>
+>     * 最后构建
+>
+>     ```shell
+>     cd Grounded-SAM-2/grounding_dino
+>     pip install -e . --no-build-isolation
+>     ```
+>
+>     * 仓库中的SAM2安装官方方法安装
+>
+> * GraspNet
+>
+>   * 官方项目安装比较困难，且存在一定的兼容性问题，最好安装我修改后的第三方版本：https://github.com/kiramint/graspnet-baseline 本项目基于此版本进行测试。
+>   * 安装我仓库中的README.md安装就好，但是请确认安装后几个库的版本与之前手动安装的一致
 
 > [!Note]
 >
-> * 如果你的Cuda版本为11.8或以下，请直接安装上面两个仓库，如果你的Cuda版本大于11.8，请使用[Grounded-SAM-2](https://github.com/IDEA-Research/Grounded-SAM-2)仓库中的GroundingDINO与SAM2。本项目测试时使用Grounded-SAM-2。
->
-> * 若要使用[Grounded-SAM-2](https://github.com/IDEA-Research/Grounded-SAM-2)中的GroundingDINO，请修改GroundingDINO代码中的import，将`from grounding_dino.groundingdino.*`改为`from groundingdino.*`，可使用以下命令快速替换
->
->   ```shell
->   cd Grounded-SAM-2/grounding_dino
->   find . -name "*.py" -type f -exec sed -i 's/grounding_dino\.groundingdino\./groundingdino\./g' {} +
->   ```
->
->   最后构建
->
->   ```shell
->   pip install -e . --no-build-isolation
->   ```
->
->   仓库中的SAM2安装官方方法安装
-
-> [!IMPORTANT]
->
-> 本项目使用官方预训练模型，请安装官方仓库中的教程运行`download_ckpts.sh`
+> 本项目使用官方预训练模型，请安装官方仓库中的教程运行`download_ckpts.sh`，GraspNet的Checkpoint由于非常小，已经包含到Git仓库中
 
 8. 编译项目
 
@@ -147,11 +171,11 @@ ros2 launch moveit_test demo.launch.py
      ![b1bf22d0115cfc25ab96bdbf16f30ff4](./README.assets/b1bf22d0115cfc25ab96bdbf16f30ff4.jpg)
      
      可以看到，URDF中机器人与现实中对应良好
-  
+
 > [!CAUTION]
 >
 > 错误的安装会导致运动规划结果与现实不一致，而且会导致碰撞检测失效，造成危险与财产损失
-  
+
 * 请按照使用DobotStudio Pro让机器人进入TCP/IP控制二次开发模式
 
 ### 相机标定
