@@ -26,7 +26,7 @@ class GripperOpenArms(Node):
         self.declare_parameter("gripper_ns", "/gripper")
         self.declare_parameter("speed", 1.0)
         self.declare_parameter("wait", False)
-        self.declare_parameter("command_repeats", 3)
+        self.declare_parameter("command_repeats", 1)
         self.declare_parameter("command_interval", 0.1)
         self.declare_parameter("timeout", 10.0)
         self.declare_parameter("position_tolerance", 0.1)

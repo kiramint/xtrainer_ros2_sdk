@@ -40,14 +40,22 @@ from std_msgs.msg import Float32MultiArray, Int32, String
 class GripperController:
     """夹爪控制类 — 通过 topic 与 gripper_node 通信"""
 
-    def __init__(self, node: Node, gripper_ns: str = "/gripper"):
+    def __init__(
+        self,
+        node: Node,
+        gripper_ns: str = "/gripper",
+        wait_timeout: float = 2.0,
+    ):
         """
         Args:
-            node:        ROS2 Node 实例
-            gripper_ns:  夹爪节点命名空间 (默认 /gripper)
+            node:          ROS2 Node 实例
+            gripper_ns:    夹爪节点命名空间 (默认 /gripper)
+            wait_timeout:  发送命令前等待 gripper_node 订阅者匹配的超时 (秒)。
+                           避免短生命周期节点在 DDS 发现完成前 publish 导致丢消息。
         """
         self._node = node
         self._ns = gripper_ns
+        self._wait_timeout = max(0.0, float(wait_timeout))
         self._cb_group = MutuallyExclusiveCallbackGroup()
 
         # 每侧发布器
@@ -117,8 +125,39 @@ class GripperController:
     #  运动控制
     # ═══════════════════════════════════════════════════════════════
 
+    def _spin_a_bit(self, timeout_sec: float):
+        """spin 一次以推进 DDS 发现。
+
+        若 node 已被外部 executor 接管 (任务节点), rclpy.spin_once 会抛异常,
+        此时退化为纯 sleep —— 发现由外部 executor 推进。
+        """
+        try:
+            rclpy.spin_once(self._node, timeout_sec=timeout_sec)
+        except Exception:
+            time.sleep(timeout_sec)
+
+    def _ensure_subscriber(self, side: str) -> bool:
+        """确保对应侧 command publisher 已与 gripper_node 订阅匹配。
+
+        匹配后 get_subscription_count() 即时返回 >0, 无额外开销;
+        仅在尚未匹配时才做有界等待。
+        """
+        pub = self._cmd_pubs[side]
+        if pub.get_subscription_count() > 0:
+            return True
+        deadline = time.monotonic() + self._wait_timeout
+        while rclpy.ok() and time.monotonic() < deadline:
+            self._spin_a_bit(0.05)
+            if pub.get_subscription_count() > 0:
+                return True
+        return False
+
     def _send_cmd(self, side: str, position: float, speed: float = 1.0):
         """发布位置命令 (0.0=开, 1.0=关)"""
+        if not self._ensure_subscriber(side):
+            self._node.get_logger().warn(
+                f"{side}/command 无订阅者 (gripper_node 未启动或未发现), 仍尝试发送"
+            )
         msg = Float32MultiArray()
         msg.data = [float(position), float(speed)]
         self._cmd_pubs[side].publish(msg)

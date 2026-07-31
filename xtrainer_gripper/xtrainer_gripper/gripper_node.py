@@ -28,6 +28,7 @@ xtrainer_gripper: 双臂夹爪 ROS2 驱动节点 (单节点管理左右两个夹
 """
 
 import os
+import queue
 import threading
 
 import rclpy
@@ -58,7 +59,7 @@ class _GripperDriver:
         self._servo_min = servo_min
         self._servo_max = servo_max
         self._cmd_lock = threading.Lock()
-        self._latest_cmd = None  # (position, speed)
+        self._cmd_queue = queue.Queue()  # (position, speed) FIFO, 不丢命令
 
         self._node.get_logger().info(
             f"[{side}] 初始化 port={port}, id={servo_id}, range=[{servo_min}, {servo_max}]"
@@ -118,7 +119,7 @@ class _GripperDriver:
             return
         position = max(0.0, min(1.0, float(data[0])))
         speed = max(0.0, min(1.0, float(data[1]))) if len(data) >= 2 else 1.0
-        self._latest_cmd = (position, speed)
+        self._cmd_queue.put((position, speed))
         self._node.get_logger().info(f"[{self._side}] 接收到命令: position={position:.3f}, speed={speed:.3f}")
 
     def _torque_callback(self, msg: Int32):
@@ -128,10 +129,10 @@ class _GripperDriver:
         self._node.get_logger().info(f"[{self._side}] 力矩限制已更新: {val}")
 
     def _process_command(self):
-        if self._latest_cmd is None:
+        try:
+            position, speed = self._cmd_queue.get_nowait()
+        except queue.Empty:
             return
-        position, speed = self._latest_cmd
-        self._latest_cmd = None
         self._move(position, speed)
         self._node.get_logger().info(f"[{self._side}] 执行命令: position={position:.3f}, speed={speed:.3f}")
 
@@ -169,7 +170,7 @@ class _GripperDriver:
                 f"[{self._side}] WritePosEx failed: result={result}, error={error}"
             )
 
-    def _read_position(self) -> float:
+    def _read_raw_position(self) -> int:
         with self._cmd_lock:
             raw, result, error = self._servo.ReadPos(self._servo_id)
         if result != 0 or error != 0:
@@ -177,26 +178,6 @@ class _GripperDriver:
                 f"[{self._side}] ReadPos failed: result={result}, error={error}",
                 throttle_duration_sec=5.0,
             )
-            return -1.0
-        return self._servo_to_normalized(raw)
-
-    def _read_load(self) -> float:
-        with self._cmd_lock:
-            raw, result, error = self._pack_handler.read2ByteTxRx(
-                self._servo_id, SMS_STS_PRESENT_LOAD_L
-            )
-        if result != 0 or error != 0:
-            self._node.get_logger().debug(
-                f"[{self._side}] ReadLoad failed: result={result}, error={error}",
-                throttle_duration_sec=5.0,
-            )
-            return -1.0
-        return raw / 1000.0
-
-    def _read_raw_position(self) -> int:
-        with self._cmd_lock:
-            raw, result, error = self._servo.ReadPos(self._servo_id)
-        if result != 0 or error != 0:
             return -1
         return raw
 
@@ -206,14 +187,25 @@ class _GripperDriver:
                 self._servo_id, SMS_STS_PRESENT_LOAD_L
             )
         if result != 0 or error != 0:
+            self._node.get_logger().debug(
+                f"[{self._side}] ReadLoad failed: result={result}, error={error}",
+                throttle_duration_sec=5.0,
+            )
             return -1
         return raw
 
     def _publish_state(self):
         raw_pos = self._read_raw_position()
         raw_load = self._read_raw_load()
-        pos = self._read_position()
-        load = self._read_load()
+
+        if raw_pos < 0:
+            pos = -1.0
+        else:
+            pos = self._servo_to_normalized(raw_pos)
+        if raw_load < 0:
+            load = -1.0
+        else:
+            load = raw_load / 1000.0
 
         state_msg = Float32MultiArray()
         state_msg.data = [float(pos), float(load)]

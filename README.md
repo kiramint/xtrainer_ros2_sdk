@@ -63,10 +63,11 @@ sudo apt install ros-jazzy-aruco\*
 > export HF_ENDPOINT=https://hf-mirror.com # HF-MIRROR
 > ```
 
-4. 配置用户权限：
+4. 配置用户权限与Udev rules：
 
 ```shell
 sudo usermod -aG dialout,plugdev,video <USERNAME>
+sudo xtrainer_gripper/setup_udev.sh
 ```
 
 5. 创建并激活conda环境：
