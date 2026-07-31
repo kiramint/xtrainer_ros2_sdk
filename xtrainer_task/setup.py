@@ -35,6 +35,8 @@ setup(
             'dino_test = xtrainer_task.dino_test:main',
             'read_pose = xtrainer_task.read_pose:main',
             'goto_pose = xtrainer_task.goto_pose:main',
+            'graspnet_test = xtrainer_task.graspnet_test:main',
+            'graspnet_sam_test = xtrainer_task.graspnet_sam_test:main',
         ],
     },
 )
