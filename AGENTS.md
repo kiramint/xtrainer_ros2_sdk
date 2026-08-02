@@ -1,6 +1,6 @@
 # AGENTS.md — XTrainer 项目记忆
 
-> 最后更新: 2026-07-27
+> 最后更新: 2026-08-02
 
 ---
 
@@ -708,3 +708,48 @@ MoveItPy 是**进程内**规划库，与 move_group 是**平级替代**，不是
   查询和下降规划
 - [x] Step2 使用 DINO/SAM2 mask 主轴 + 深度 + TF 估计吸管三维方向，
   仅旋转 `J1_6` 后执行抓取
+
+---
+
+## 本次会话修改记录 (夹爪命令可靠性, 2026-08-02)
+
+### 问题现象
+
+- 现象1: 快速连发开/合命令时, 部分命令不执行
+- 现象2: 通过 CLI 脚本 (`gripper_open_arms`/`gripper_close_arms`) 触发时偶发"命令收不到" (`gripper_node` 日志里没有 `[left/right] 接收到命令`)
+
+### `xtrainer_gripper/xtrainer_gripper/gripper_node.py` — 命令覆盖丢失 → FIFO 队列
+
+- [x] **根因**: 命令处理用"最新覆盖"模式 (`_latest_cmd` 单变量) + 30ms 处理定时器. 两条命令间隔 < 30ms 时, 前一条在执行前被覆盖, 永远不会下发到舵机
+- [x] `_latest_cmd` → `queue.Queue()`, FIFO 不丢命令
+- [x] `_cmd_callback`: `queue.put()`; `_process_command`: `queue.get_nowait()` (仍 30ms 定时器每次取 1 条, 串口写速率上限不变 ≤33Hz, 不增加发送频率)
+- [x] 佐证: `gripper_open_arms.py` 早有 `command_repeats=3` / `command_interval=0.1` 重发补丁在绕这个 bug
+
+### `xtrainer_gripper/xtrainer_gripper/gripper_node.py` — 清理重复串口读
+
+- [x] **问题**: `_publish_state` 位置/负载各读两次串口 (raw 一次 + normalized 又一次), 20Hz 下浪费 ~6ms/周期 RS485 总线, 挤占单线程执行器
+- [x] 合并为各读一次 raw, normalized 值本地推导 (`_servo_to_normalized` + `raw/1000`)
+- [x] 删除冗余 `_read_position`/`_read_load`, 在 `_read_raw_*` 中补回 throttled debug 日志
+
+### `xtrainer_gripper/xtrainer_gripper/gripper_control.py` — DDS 发现丢消息 → 发送前等订阅匹配
+
+- [x] **根因**: CLI 脚本是短生命周期节点, 创建 publisher 后 publish 时若 DDS pub↔sub 匹配尚未完成, VOLATILE QoS 下该条直接丢弃 (无 late-joining). `gripper_close_arms` 默认 `command_repeats=1` (只发一次), 比 `open` (`repeats=3`) 更易丢
+- [x] 新增 `_ensure_subscriber(side)`: 用 `publisher.get_subscription_count()` 确认已匹配, 未匹配则有界等待 (默认 2s); 匹配后即时返回零开销 (一次本地 count 查询, 非 DDS 往返)
+- [x] 新增 `_spin_a_bit()`: 兼容两种调用方
+  - CLI (节点未挂 executor): `rclpy.spin_once` 推进发现
+  - 任务节点 (节点被 `MultiThreadedExecutor` 接管, 如 `start_insert_straw.py`): `spin_once` 抛异常 → `try/except` 退化为 `sleep`, 发现由外部 executor 推进
+- [x] `GripperController.__init__` 新增 `wait_timeout` 参数 (默认 2.0)
+- [x] 阻塞发生在调用方线程, 不影响 `gripper_node` 进程
+
+### 夹爪可靠性陷阱
+
+| 陷阱 | 后果 | 对策 |
+| ------ | ------ | ------ |
+| `_latest_cmd` 覆盖 + 30ms 处理定时器 | 间隔 <30ms 的命令被静默丢弃 | 用 FIFO `queue.Queue` |
+| `_publish_state` 重复串口读 | RS485 总线占用翻倍, 挤占执行器线程 | raw 只读一次, normalized 本地推导 |
+| 短生命周期节点 publish 早于 DDS 匹配 | VOLATILE QoS 丢首条命令 (偶发"收不到") | 发送前 `get_subscription_count()` 等匹配 |
+| `gripper_close_arms` `repeats=1` | 单发容错为 0, 最易受发现丢失影响 | 现由 `_ensure_subscriber` 保证; `repeats` 补丁已非必需 (保留作冗余) |
+
+### 说明 (本次未改动)
+
+- `gripper_node` 仍为 `rclpy.spin` 单线程执行器: 状态发布做同步阻塞串口读, 偶发"收到但延迟"是潜在问题, 但**不是**本次"收不到"的原因 (本次是 DDS 发现层丢失). 若后续出现响应延迟, 再上 `MultiThreadedExecutor` + callback group 隔离 (同 dobot driver / xtrainer_bridge 的拆分经验)
