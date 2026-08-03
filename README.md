@@ -80,25 +80,13 @@ conda activate xtrainer_env
 6. 安装Python软件包：
 
 ```shell
-# ROS2
-pip install colcon-common-extensions pyyaml lark
-# Basic library (Same version as ubuntu)
-pip install numpy==1.26.4		# 必须为此版本
-pip install opencv-contrib-python~=4.6.0  # 兼容Numpy 1.26.4
-# GroundingDINO & SAM2
-pip install supervision==0.29.1 transformers==4.44.2 yapf==0.43.0 pycocotools==2.0.11 timm==1.0.28
-# GraspNet
-pip install scipy==1.18.0
-pip install open3d==0.19.0
-pip install scikit-learn==1.9.0
-pip install matplotlib==3.11.1
-
+pip install -r requirements.txt
 ```
 
 > [!IMPORTANT]
 >
 > * 请务必确保`which colcon`的路径在：`/<PATH_TO_CONDA>/miniconda3/envs/xtrainer_env_test/bin/colcon`下，防止shellbang错误无法加载conda环境
-> * 软件包可能有缺失，请按照实际情况添加或修改
+> * 请确保numpy版本为1.26.4，scipy版本为1.13.1
 
 7. 按照官方教程安装GroundingDINO与SAM2（如果仅使用SDK无需安装）
 
@@ -122,14 +110,14 @@ pip install matplotlib==3.11.1
 >     cd Grounded-SAM-2/grounding_dino
 >     find . -name "*.py" -type f -exec sed -i 's/grounding_dino\.groundingdino\./groundingdino\./g' {} +
 >     ```
->
+>    
 >     * 最后构建
->
+>    
 >     ```shell
 >     cd Grounded-SAM-2/grounding_dino
 >     pip install -e . --no-build-isolation
 >     ```
->
+>    
 >     * 仓库中的SAM2安装官方方法安装
 >
 > * GraspNet
