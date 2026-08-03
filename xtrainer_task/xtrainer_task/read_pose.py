@@ -23,8 +23,8 @@ def main():
     try:
         while rclpy.ok():
             rclpy.spin_once(node, timeout_sec=0.1)
-            pose1 = mover.get_current_pose('Arm1')
-            pose2 = mover.get_current_pose('Arm2')
+            pose1 = mover.get_current_pose('Arm1',tip_link="L1_gripper_tip")
+            pose2 = mover.get_current_pose('Arm2',tip_link="L2_gripper_tip")
             # ARM1
             node.get_logger().info(
                 f'Arm1 — pos:\nx: {pose1.position.x:.4f}\ny: {pose1.position.y:.4f}\nz: {pose1.position.z:.4f}\nox: {pose1.orientation.x:.4f}\noy: {pose1.orientation.y:.4f}\noz: {pose1.orientation.z:.4f}\now: {pose1.orientation.w})'

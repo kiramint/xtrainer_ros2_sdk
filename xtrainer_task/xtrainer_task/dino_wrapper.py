@@ -177,9 +177,18 @@ class DinoWrapper:
             )
 
         # ── 4. 后处理 ───────────────────────────────────────
+        scores_arr = np.asarray(scores)
+
         if self.multimask_output:
-            best = np.argmax(scores, axis=1)
+            # SAM2 在 multimask_output=True 时返回 scores 形状 (N, K)
+            # 已通过 argmax 选出最佳 mask，scores 也必须同步降到 (N,)
+            best = np.argmax(scores_arr, axis=1)
             masks = masks[np.arange(masks.shape[0]), best]
+            scores_arr = scores_arr[np.arange(scores_arr.shape[0]), best]
+        else:
+            # multimask_output=False 时部分 SAM2 版本仍返回 (N, 1)，
+            # reshape(-1) 兜底强制一维，避免 tolist() 后变成 list[list[float]]
+            scores_arr = scores_arr.reshape(-1)
 
         if masks.ndim == 4:
             masks = masks.squeeze(1)
@@ -187,7 +196,7 @@ class DinoWrapper:
         return DetectionResult(
             boxes=input_boxes,
             masks=masks.astype(bool),
-            scores=scores.tolist() if isinstance(scores, np.ndarray) else list(scores),
+            scores=scores_arr.tolist(),
             labels=list(labels),
             image_height=h,
             image_width=w,

@@ -19,7 +19,7 @@
 Boot::
 
     export PYTHONPATH=/opt/Project/Grounded-SAM-2/grounding_dino:/opt/Project/Grounded-SAM-2:/home/kira/miniconda3/lib/python3.12/site-packages:$PYTHONPATH
-    ros2 run xtrainer_task graspnet_sam_test --ros-args -p prompt:="bottle."
+    ros2 run xtrainer_task graspnet_sam_test --ros-args -p pointcloud_topic:=/camera/camera_right/depth/color/points -p image_topic:=/camera/camera_right/color/image_raw -p prompt:=bottle
 
 .. note::
 
@@ -45,7 +45,6 @@ from sensor_msgs.msg import Image, PointCloud2
 from graspnet.graspnet import GraspNet, pred_decode
 from xtrainer_task.dino_test import ros_image_to_cv2
 from xtrainer_task.dino_wrapper import DinoWrapper
-
 
 # ── PointCloud2 datatype → numpy ──────────────────────────────
 _DTYPE_MAP = {
@@ -90,6 +89,8 @@ class GraspNetSamTestNode(Node):
         self.declare_parameter("mask_index", -1)
         self.declare_parameter("min_infer_interval", 0.0)
         self.declare_parameter("show_2d", True)
+        # SAM 边缘膨胀: 3D 空间把分割点云往外多保留 radius_m 内的点
+        self.declare_parameter("mask_dilation_m", 0.01)
 
         self._image_topic = self.get_parameter("image_topic").value
         self._pointcloud_topic = self.get_parameter("pointcloud_topic").value
@@ -104,6 +105,7 @@ class GraspNetSamTestNode(Node):
         self._mask_index = self.get_parameter("mask_index").value
         self._min_infer_interval = self.get_parameter("min_infer_interval").value
         self._show_2d = self.get_parameter("show_2d").value
+        self._mask_dilation_m = self.get_parameter("mask_dilation_m").value
 
         # ── 加载 GroundingDINO + SAM2 ──────────────────────────
         self.get_logger().info("Loading Grounding DINO + SAM2 models …")
@@ -204,8 +206,11 @@ class GraspNetSamTestNode(Node):
 
         # ── 4. 取 mask 并作用到点云网格 ───────────────────────
         mask2d = self._select_mask(det, H, W)
+        if mask2d is not None:
+            mask2d = self._dilate_mask_3d(mask2d, xyz, self._mask_dilation_m)
 
         grippers = []
+        grasp_axes = []
         if mask2d is not None:
             valid = np.isfinite(xyz).all(axis=2)
             if self._max_distance > 0:
@@ -226,12 +231,12 @@ class GraspNetSamTestNode(Node):
             # ── 5. GraspNet 抓取检测 ──────────────────────────
             gg = self._predict_grasps(cloud_o3d)
             if gg is not None and len(gg) > 0:
-                grippers = self._filter_and_vis_grasps(gg)
+                grippers, grasp_axes = self._filter_and_vis_grasps(gg)
 
         # ── 6. 结果交给主线程显示 ─────────────────────────────
         with self._result_lock:
             self._result_cloud = cloud_o3d
-            self._result_geometries = grippers
+            self._result_geometries = grippers + grasp_axes
 
         # ── 7. 2D 分割结果 OpenCV 显示 ───────────────────────
         if self._show_2d:
@@ -288,6 +293,37 @@ class GraspNetSamTestNode(Node):
         if idx >= len(order):
             idx = 0
         return masks[order[idx]]
+
+    @staticmethod
+    def _dilate_mask_3d(mask2d, xyz, radius_m: float):
+        """3D 空间膨胀 mask: 保留 mask 点云周围 radius_m (米) 内的所有点云点。
+
+        SAM 边缘常略紧 (少保留了一些物体表面点), 用该参数把分割点云
+        往外多保留一圈。radius_m<=0 时直接返回原 mask。
+        """
+        if radius_m <= 0:
+            return mask2d
+
+        valid = np.isfinite(xyz).all(axis=2) & (xyz[..., 2] > 0)
+        sel = mask2d & valid
+        pts = xyz[sel].reshape(-1, 3)
+        if len(pts) == 0:
+            return mask2d
+
+        from scipy.spatial import cKDTree
+        tree = cKDTree(pts)
+
+        flat_valid = valid.reshape(-1)
+        idx = np.where(flat_valid)[0]
+        if len(idx) == 0:
+            return mask2d
+
+        grid = xyz.reshape(-1, 3)
+        dists, _ = tree.query(grid[idx], k=1)
+
+        dilated = mask2d.copy()
+        dilated.reshape(-1)[idx[dists <= radius_m]] = True
+        return dilated
 
     # ── 有序点云解析 ──────────────────────────────────────────
     @staticmethod
@@ -392,6 +428,18 @@ class GraspNetSamTestNode(Node):
         return GraspGroup(gg_array)
 
     def _filter_and_vis_grasps(self, gg):
+        """过滤抓取并生成可视化几何体 (夹爪图标 + 每抓取坐标系)。
+
+        Parameters
+        ----------
+        gg : GraspGroup
+            原始抓取集合
+
+        Returns
+        -------
+        tuple[list, list]
+            (夹爪三角网格列表, 每抓取坐标系列表, 相机系, 调试方向用)
+        """
         # 过滤夹爪长度(depth) > max_grasp_depth 的抓取
         if self._max_grasp_depth > 0 and len(gg) > 0:
             keep = np.where(gg.depths <= self._max_grasp_depth)[0]
@@ -399,7 +447,19 @@ class GraspNetSamTestNode(Node):
         gg.nms()
         gg.sort_by_score()
         gg = gg[: self._top_k_grasps]
-        return gg.to_open3d_geometry_list()
+
+        geoms = gg.to_open3d_geometry_list()
+        axes = []
+        for g in gg:
+            T = np.eye(4)
+            T[:3, :3] = g.rotation_matrix
+            T[:3, 3] = g.translation
+            axes.append(
+                o3d.geometry.TriangleMesh.create_coordinate_frame(
+                    size=0.03
+                ).transform(T)
+            )
+        return geoms, axes
 
     # ── 主线程：刷新显示 ──────────────────────────────────────
     def attach_visualizer(self, vis):
@@ -454,6 +514,10 @@ def main():
         height=720,
     )
     node.attach_visualizer(vis)
+    # 参考坐标轴 (相机光学系): X红 Y绿 Z蓝
+    vis.add_geometry(
+        o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+    )
 
     def _on_quit(_vis):
         node.get_logger().info("Quit requested.")
