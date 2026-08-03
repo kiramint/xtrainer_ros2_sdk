@@ -234,6 +234,7 @@ URDF effort/velocity 全部设为 `0` (=不限制), 清理 SolidWorks 导出垃�
 #### `xtrainer_controller` (对照官方 dobot_moveit/action_move_server.py)
 
 双臂 FollowJointTrajectory→ServoJ, MultiThreadedExecutor + ReentrantCallbackGroup。
+**同步 execute_callback** (非 async, 避免 time.sleep 阻塞事件循环), `time.monotonic()` 绝对时刻对齐。
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
@@ -262,12 +263,12 @@ ros2 launch moveit_test demo.launch.py
 ### 官方文档
 
 ```
-ServoJ(J1,J2,J3,J4,J5,J6,t,lookahead_time,gain)
+ServoJ(J1,J2,J3,J4,J5,J6,t,aheadtime,gain)
 ```
 
 - **J1~J6**: 目标关节角度, 单位 **度** (不是弧度!)
 - **t** (可选): 该点位的运行时间, 秒, 范围 [0.02, 3600.0], 默认 0.1
-- **lookahead_time** (可选): 前瞻量, 范围 [20.0, 100.0], 默认 50
+- **aheadtime** (可选): 前瞻量, 范围 [20.0, 100.0], 默认 50
 - **gain** (可选): 比例增益, 范围 [200.0, 1000.0], 默认 500
 - 调用频率建议 33Hz (30ms 间隔)
 - 从控制器 3.5.5 起不受全局速度影响
@@ -296,8 +297,9 @@ int32 res
 
 ### 驱动关节状态 (`command.cpp`)
 
-- RealTime TCP (端口 30004) 接收 `q_actual[6]` (度)
-- `command.cpp:52`: `current_joint_[i] = deg2Rad(real_time_data_->q_actual[i])` — **转成弧度**发布到 `joint_states_robot`
+- RealTime TCP (端口 30004) 接收 `q_actual[6]` (度), 控制器每 8ms (125Hz) 推送 1440 字节
+- `recvTask` 先写入栈上 `local_data`, 再在 `mutex_` 下拷贝到 `real_time_data_` 和 `current_joint_[]` (deg→rad)
+- `getRealData()` 在 `mutex_` 下返回 `RealTimeData` 值拷贝 (不再返回 shared_ptr)
 - 因此 MoveIt 看到的是弧度, 发给 ServoJ 时必须转回度
 
 ---
@@ -538,6 +540,11 @@ ros2 run xtrainer_control disable_arms
 | driver 单线程 spin_some + ServoJ 阻塞 | /joint_states_robot 跌到 30Hz 且不稳 | MultiThreadedExecutor + 独立 callback group |
 | 单 node 内 joint_states + ServoJ 同 executor | 线程竞争 → /joint_states 不稳 | 拆成两个独立 node (进程隔离) |
 | `DeclareBooleanLaunchAction` | ImportError (不存在) | 用 `moveit_configs_utils.launch_utils.DeclareBooleanLaunchArg` |
+| driver `doTcpCmd` 每次 3 条 `std::cout` | 33Hz×双臂=198 条 stdout/s, `endl` flush → I/O 抖动 | `#define DEBUG 0` 关闭 |
+| driver `wall_timer` 与 ~70 服务共享默认 group | 非 ServoJ 服务调用阻塞 → joint_states 发布暂停 | timer 独立 callback group |
+| `dash_board_tcp_` 无互斥锁 | servo_cb_group_ 与默认 group 并发写同一 socket → 命令交错损坏 | `tcp_mutex_` 保护 doTcpCmd |
+| `recvTask` 直接写 `real_time_data_` | `pubFeedBackInfo` 100Hz 无锁读 → data race | 先写栈 local buffer, 再 mutex 拷贝 |
+| `xtrainer_controller` async def + time.sleep | 阻塞 asyncio 事件循环 → 双臂并发受限 | 改为同步 def, MultiThreadedExecutor 分配独立线程 |
 
 ---
 
@@ -753,3 +760,39 @@ MoveItPy 是**进程内**规划库，与 move_group 是**平级替代**，不是
 ### 说明 (本次未改动)
 
 - `gripper_node` 仍为 `rclpy.spin` 单线程执行器: 状态发布做同步阻塞串口读, 偶发"收到但延迟"是潜在问题, 但**不是**本次"收不到"的原因 (本次是 DDS 发现层丢失). 若后续出现响应延迟, 再上 `MultiThreadedExecutor` + callback group 隔离 (同 dobot driver / xtrainer_bridge 的拆分经验)
+
+---
+
+## 本次会话修改记录 (驱动通信可靠性 + bridge 重构, 2026-08-02)
+
+### 官方 TCP/IP 协议文档确认
+
+协议文档: `/opt/Project/TCP-IP-Protocol-6AXis-V4/Dobot TCP_IP二次开发接口文档V4.5.1_20240815_cn.md`
+
+- **端口 29999 (Dashboard)**: ASCII 文本, 请求-响应, 所有控制指令 (ServoJ/MovJ/EnableRobot…)
+- **端口 30004 (RealTime)**: 二进制 1440 字节, 控制器每 **8ms (125Hz)** 推送 (QActual/ToolVectorActual/RobotMode 等)
+- 端口 30005 (200ms)、30006 (默认 1000ms, 可配) — driver 未使用
+- 两条连接均为**长连接** (persistent), 断线自动重连
+
+### `dobot_bringup_v4` — driver 三重隔离 + 通信安全
+
+- [x] **根因 1**: `wall_timer` 与 ~70 个非 ServoJ 服务共享默认 callback group → 任何服务调用阻塞 TCP echo 时 joint_states 发布被排队
+- [x] `main.cpp`: 新建 `timer_cb_group` (MutuallyExclusive), wall_timer 挂载其上, 与 servo_cb_group_ 和默认 group 三方隔离
+- [x] **根因 2**: `dash_board_tcp_` socket 无互斥锁 → servo_cb_group_ 与默认 group 的服务并发写同一 socket, TCP 命令交错损坏
+- [x] `command.h`: 新增 `tcp_mutex_` 成员; `doTcpCmd`/`doTcpCmd_f` 从 `static` 改为实例方法; `mutex_` 改为 `mutable`
+- [x] `command.cpp`: `doTcpCmd`/`doTcpCmd_f` 开头加 `std::lock_guard<std::mutex> tcp_lock(tcp_mutex_)`
+- [x] **根因 3**: `doTcpCmd` 每次 3 条 `std::cout << ... << std::endl` (发送时间+命令、ErrorID、完整响应), 33Hz×双臂 = 198 条 stdout/s
+- [x] `command.cpp`: 新增 `#define DEBUG 0`, 3 条日志全部 `#if DEBUG` 包裹 (硬编码关闭, 与 CMake 无关; 开发时改 `1` 即恢复)
+- [x] **根因 4**: `recvTask` 直接写 `real_time_data_` (shared_ptr 指向的缓冲区), `pubFeedBackInfo` 100Hz 无锁读同一缓冲区 → data race
+- [x] `command.cpp` `recvTask`: `tcpRecv` 改为写入栈上 `RealTimeData local_data`, 验证 `len==1440` 后在 `mutex_` 下 `memcpy` 到 `real_time_data_`
+- [x] `command.h`/`command.cpp`: `getRealData()` 返回类型 `shared_ptr<RealTimeData>` → `RealTimeData` (值拷贝), 在 `mutex_` 下返回
+- [x] `cr_robot_ros2.cpp` `pubFeedBackInfo`: `shared_ptr<RealTimeData>` → `RealTimeData`, 所有 `->` → `.`
+
+### `xtrainer_bridge` — controller async→sync 回归修复
+
+- [x] **根因**: `xtrainer_controller.py` 用 `async def execute_callback` 调用同步阻塞函数 (`time.sleep`), 阻塞 asyncio 事件循环; 旧的 `xtrainer_bridge_node.py` 用的是正确的同步 `def`
+- [x] `async def` → `def` (3 个方法: `_arm1_execute_cb`, `_arm2_execute_cb`, `_execute`)
+- [x] 删除执行前逐点日志 (`_execution_trajectory` 中对每个 waypoint 打 `INFO` 日志, 200 点 = 200 条启动延迟)
+- [x] 合并 `_execution_trajectory` + `_execute_trajectory` 为一个函数, 直接遍历原始 `trajectory.points`
+- [x] `time.time()` → `time.monotonic()` (单调时钟, 不受 NTP 影响)
+- [x] 新增取消检查 (`goal_handle.is_cancel_requested`), service 可用性检查 (`wait_for_service`), 正确的 `succeed`/`canceled`/`abort` 结果处理

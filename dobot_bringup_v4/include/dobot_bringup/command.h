@@ -125,7 +125,8 @@ protected:
     static constexpr double PI = 3.1415926;
 
 private:
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
+    std::mutex tcp_mutex_;
     double current_joint_[6];
     double tool_vector_[6];
     std::shared_ptr<RealTimeData> real_time_data_;
@@ -148,13 +149,13 @@ public:
     bool isEnable() const;
     bool isConnected() const;
     uint16_t getRobotMode() const;
-    std::shared_ptr<RealTimeData> getRealData() const;
+    RealTimeData getRealData() const;
 
 private:
-    static void doTcpCmd(std::shared_ptr<TcpClient> &tcp, const char *cmd, int32_t &err_id,
-                         std::vector<std::string> &result);
-    static void doTcpCmd_f(std::shared_ptr<TcpClient> &tcp, const char *cmd, int32_t &err_id,std::string &mode_id,
-                         std::vector<std::string> &result);
+    void doTcpCmd(std::shared_ptr<TcpClient> &tcp, const char *cmd, int32_t &err_id,
+                  std::vector<std::string> &result);
+    void doTcpCmd_f(std::shared_ptr<TcpClient> &tcp, const char *cmd, int32_t &err_id,std::string &mode_id,
+                  std::vector<std::string> &result);
     static inline double rad2Deg(double rad)
     {
         return rad * 180.0 / PI;

@@ -37,9 +37,9 @@ int main(int argc, char *argv[])
 
     robot->init();
 
-    // 用 wall_timer 替代原来的 while+rate 循环发布
-    // timer 在节点默认 callback group 上, 与 ServoJ 的独立 group 分开
-    // 配合 MultiThreadedExecutor, ServoJ 阻塞 TCP 不会影响 joint_states 发布
+    // wall_timer 使用独立 callback group, 与所有服务 (默认 group) 和 ServoJ (servo_cb_group_) 都隔离
+    // 确保任何服务调用阻塞 TCP echo 时, joint_states 发布不被排队等待
+    auto timer_cb_group = robot->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     double position[6] = {0};
     rclcpp::TimerBase::SharedPtr pub_timer = robot->create_wall_timer(
         std::chrono::milliseconds(static_cast<int64_t>(1000.0 / rate_value)),
@@ -76,10 +76,13 @@ int main(int argc, char *argv[])
             robot_status_msg.is_enable = robot->isEnable();
             robot_status_msg.is_connected = robot->isConnected();
             robot_status_pub->publish(robot_status_msg);
-        });
+        },
+        timer_cb_group);
 
-    // MultiThreadedExecutor: ServoJ service (独立 group) 和 timer (默认 group)
-    // 可在不同线程并发, ServoJ TCP 阻塞不再卡住 joint_states 发布
+    // MultiThreadedExecutor: 三个 callback group 互不阻塞
+    //   - timer_cb_group: wall_timer (joint_states 发布, 50Hz)
+    //   - servo_cb_group_: ServoJ/ServoP (轨迹执行, 阻塞 TCP echo)
+    //   - 默认 group: 其他 ~70 个服务 (EnableRobot/MovJ/...)
     rclcpp::executors::MultiThreadedExecutor executor;
     executor.add_node(robot);
     try

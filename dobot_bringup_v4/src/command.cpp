@@ -2,6 +2,10 @@
 #include <iostream>
 #include <chrono>
 #include <thread>
+
+#ifndef DEBUG
+#define DEBUG 0
+#endif
 CRCommanderRos2::CRCommanderRos2(const std::string &ip)
     : current_joint_{}, tool_vector_{}, is_running_(false)
 {
@@ -40,18 +44,20 @@ void CRCommanderRos2::recvTask()
         {
             try
             {
-                uint8_t *tmpData = reinterpret_cast<uint8_t *>(real_time_data_.get());
+                RealTimeData local_data;
+                uint8_t *tmpData = reinterpret_cast<uint8_t *>(&local_data);
                 if (real_time_tcp_->tcpRecv(tmpData, sizeof(RealTimeData), has_read, 5000))
                 {
 
-                    if (real_time_data_->len != 1440)
+                    if (local_data.len != 1440)
                         continue;
 
                     mutex_.lock();
+                    memcpy(real_time_data_.get(), &local_data, sizeof(RealTimeData));
                     for (uint32_t i = 0; i < 6; i++)
-                        current_joint_[i] = deg2Rad(real_time_data_->q_actual[i]);
+                        current_joint_[i] = deg2Rad(local_data.q_actual[i]);
 
-                    memcpy(tool_vector_, real_time_data_->tool_vector_actual, sizeof(tool_vector_));
+                    memcpy(tool_vector_, local_data.tool_vector_actual, sizeof(tool_vector_));
                     mutex_.unlock();
                 }
                 else
@@ -113,15 +119,18 @@ void CRCommanderRos2::doTcpCmd(std::shared_ptr<TcpClient> &tcp, const char *cmd,
                                std::vector<std::string> &result)
 {
     std::ignore = result;
+    std::lock_guard<std::mutex> tcp_lock(tcp_mutex_);
     try
     {
         uint32_t has_read;
         char buf[1024];
         memset(buf, 0, sizeof(buf));
+#if DEBUG
         auto currentTime = std::chrono::system_clock::now();
         auto currentTime_ms = std::chrono::time_point_cast<std::chrono::milliseconds>(currentTime);
         auto valueMS = currentTime_ms.time_since_epoch().count();
         std::cout <<"time: "<<valueMS <<"  tcp send cmd :" << cmd << std::endl;
+#endif
 
         tcp->tcpSend(cmd, strlen(cmd));
         char *recv_ptr = buf;
@@ -147,12 +156,16 @@ void CRCommanderRos2::doTcpCmd(std::shared_ptr<TcpClient> &tcp, const char *cmd,
                 std::string result = str.substr(0, i-1);
                 int num = stringToInt(result);
                 err_id = num;
+#if DEBUG
                 std::cout << "ErrorID: " << result<< std::endl;
+#endif
                 break;
             }
         }
 
-        std::cout << "tcp recv feedback : " << buf << std::endl; // FIXME parse the buf may be better
+#if DEBUG
+        std::cout << "tcp recv feedback : " << buf << std::endl;
+#endif
     }
     catch (const std::logic_error &err)
     {
@@ -165,15 +178,18 @@ void CRCommanderRos2::doTcpCmd_f(std::shared_ptr<TcpClient> &tcp, const char *cm
                                std::vector<std::string> &result)
 {
     std::ignore = result;
+    std::lock_guard<std::mutex> tcp_lock(tcp_mutex_);
     try
     {
         uint32_t has_read;
         char buf[1024];
         memset(buf, 0, sizeof(buf));
+#if DEBUG
         auto currentTime = std::chrono::system_clock::now();
         auto currentTime_ms = std::chrono::time_point_cast<std::chrono::milliseconds>(currentTime);
         auto valueMS = currentTime_ms.time_since_epoch().count();
         std::cout <<"time: "<<valueMS <<"  tcp send cmd :" << cmd << std::endl;
+#endif
         tcp->tcpSend(cmd, strlen(cmd));
         char *recv_ptr = buf;
         while (true)
@@ -199,7 +215,9 @@ void CRCommanderRos2::doTcpCmd_f(std::shared_ptr<TcpClient> &tcp, const char *cm
                 std::string result = str.substr(0, i-1);
                 int num = stringToInt(result);
                 err_id = num;
+#if DEBUG
                 std::cout << "ErrorID: " << num<< std::endl;
+#endif
                 pose1 = i;
             }
             if (buf[i] == '}')
@@ -210,7 +228,9 @@ void CRCommanderRos2::doTcpCmd_f(std::shared_ptr<TcpClient> &tcp, const char *cm
                 break;
             }
         }
-        std::cout << "tcp recv feedback : " << buf << std::endl; // FIXME parse the buf may be better
+#if DEBUG
+        std::cout << "tcp recv feedback : " << buf << std::endl;
+#endif
     }
     catch (const std::logic_error &err)
     {
@@ -293,7 +313,8 @@ uint16_t CRCommanderRos2::getRobotMode() const
     return real_time_data_->robot_mode;
 }
 
-std::shared_ptr<RealTimeData> CRCommanderRos2::getRealData() const
+RealTimeData CRCommanderRos2::getRealData() const
 {
-    return real_time_data_;
+    std::lock_guard<std::mutex> lock(mutex_);
+    return *real_time_data_;
 }

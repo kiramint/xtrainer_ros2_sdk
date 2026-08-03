@@ -8,9 +8,12 @@
 |--------|------|
 | 删除 `robot_number` | 原 `kRobotName` 逻辑导致 namespace 失效，删掉后所有 topic/service 改为相对路径 |
 | MultiThreadedExecutor | 替代 `while`+`spin_some`，避免 ServoJ 回调阻塞 joint_states 发布 |
-| 回调组隔离 | ServoJ/ServoP 服务放入独立 `MutuallyExclusive` callback group，与 timer 发布隔离 |
+| 三组 callback group 隔离 | `timer_cb_group` (joint_states 发布)、`servo_cb_group_` (ServoJ/ServoP)、默认 group (~70 个其他服务)，三者互不阻塞 |
+| Dashboard TCP 互斥锁 | `tcp_mutex_` 保护 `dash_board_tcp_` 的 send+recv，防止不同 callback group 的服务并发写同一 socket 导致命令交错损坏 |
+| `doTcpCmd` 日志可控 | `#define DEBUG 0` 硬编码关闭每次 TCP 命令的 stdout 输出 (原 3 条/call × 33Hz × 双臂 = 198 条/s)，开发时改 `1` 即可恢复 |
+| RealTime 数据竞态修复 | `recvTask` 改为先写入栈上 local buffer，再在 `mutex_` 下拷贝到 `real_time_data_`；`getRealData()` 返回值拷贝 (不再返回 shared_ptr) |
 | TCP 忙循环修复 | `tcpRecv(timeout=0)` 改为 `timeout=100ms`（select 阻塞），`sleep(0.01)` 改为 `sleep_for(1ms)` |
-| `joint_states_robot` 发布 | 50Hz wall_timer，角度为弧度（`command.cpp:52` 做 deg→rad 转换） |
+| `joint_states_robot` 发布 | 50Hz wall_timer (独立 callback group)，角度为弧度（`command.cpp` 做 deg→rad 转换） |
 
 ## Launch 文件
 
@@ -93,13 +96,29 @@ source install/setup.bash
 
 ```
 cr_robot_ros2_node (namespace /ArmX)
-├── TCP Dashboard (端口 29999) → 发送 ServoJ 命令
-├── TCP RealTime (端口 30004) → 接收 q_actual[6] (度)
-├── command.cpp → deg→rad 转换 → /ArmX/joint_states_robot (50Hz)
-└── ServoJ 服务 → 委托给独立 callback group (MutuallyExclusive)
+│
+├── recvTask 线程 (独立后台线程)
+│   ├── TCP RealTime (端口 30004) ← 控制器每 8ms (125Hz) 推送 1440 字节二进制
+│   │   └── q_actual[6] (度) → 栈上 local buffer → mutex_ → current_joint_[] (弧度) + real_time_data_
+│   └── 自动重连 Dashboard + RealTime
+│
+├── MultiThreadedExecutor
+│   ├── timer_cb_group (MutuallyExclusive):
+│   │   └── wall_timer 50Hz → getCurrentJointStatus(mutex_ memcpy) → publish joint_states_robot
+│   │                                      → getToolVectorActual → publish ToolVectorActual
+│   │                                      → publish RobotStatus
+│   │
+│   ├── servo_cb_group_ (MutuallyExclusive):
+│   │   └── ServoJ/ServoP → doTcpCmd(tcp_mutex_ lock) → TCP Dashboard send+echo (~10-15ms)
+│   │
+│   └── 默认 group (MutuallyExclusive):
+│       └── ~70 个其他服务 → doTcpCmd(tcp_mutex_ lock) → TCP Dashboard send+echo
+│
+└── pubFeedBackInfo 线程 (独立后台线程, 100Hz)
+    └── getRealData() → mutex_ 下值拷贝 RealTimeData → JSON → publish FeedInfo
 ```
 
 ## 参考
 
 - 官方 SDK: `/opt/Project/XTrainer/SDK/DOBOT_6Axis_ROS2_V4/`
-- TCP 协议文档: `docs/TCP_IP远程控制接口文档（V3）_20240105_cn.pdf`
+- TCP 协议文档: `/opt/Project/TCP-IP-Protocol-6AXis-V4/Dobot TCP_IP二次开发接口文档V4.5.1_20240815_cn.md`
