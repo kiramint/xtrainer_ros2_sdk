@@ -89,6 +89,15 @@ XTrainer 是一个双臂机器人系统，使用 ROS2 Jazzy + Ubuntu24.04 进行
 | 左手 | camera_left | `/camera/camera_left/color/image_raw` |
 | 右手 | camera_right | `/camera/camera_right/color/image_raw` |
 
+**点云话题** (2026-08-04 起由 `depth_image_proc/point_cloud_xyzrgb_node` 发布, 非 realsense 自带):
+
+| 话题 | frame_id | H×W | 说明 |
+|------|----------|-----|------|
+| `/camera/<X>/aligned_depth_to_color/image_raw` | `camera_X_color_optical_frame` | 1280×720 | realsense 发, 带全套滤波 (decimation/spatial/temporal/hole_filling) |
+| `/camera/<X>/depth/color/points` | `camera_X_color_optical_frame` | 720×1280 | depth_image_proc 发, **color 视角**, SAM mask 可 1:1 直接作用 |
+
+> **不要再用 realsense 的 `pointcloud.enable`**: 该路径在 depth 坐标系 (frame_id=`depth_optical_frame`, H×W=decimation 后 depth 分辨率), 与 SAM mask 错位。详见本次会话记录 (2026-08-04)。
+
 ---
 
 ## Launch 文件结构
@@ -99,9 +108,10 @@ XTrainer 是一个双臂机器人系统，使用 ROS2 Jazzy + Ubuntu24.04 进行
 
 1. `xtrainer_driver` (dobot_bringup_v4 → xtrainer.launch.py: 双臂节点 + robot_state_publisher + xtrainer_bridge)
 2. `gripper_node` (单节点管理双臂，话题: /gripper/left/xxx, /gripper/right/xxx)
-3. `realsense_camera_top` + `realsense_camera_left` + `realsense_camera_right`
-4. 按需加载 easy_handeye2 标定结果 (publish.launch.py)
-5. 延迟 3s 后自动使能双臂 (enable_arms)
+3. `realsense_camera_top` + `realsense_camera_left` + `realsense_camera_right` (关闭 `pointcloud.enable`, 保留 decimation/spatial/temporal/hole_filling/align_depth)
+4. `camera_top_point_cloud_xyzrgb` + `camera_left_point_cloud_xyzrgb` + `camera_right_point_cloud_xyzrgb` (depth_image_proc, 消费 aligned_depth_to_color + color + camera_info, 发布 `/camera/<X>/depth/color/points` 在 color 坐标系)
+5. 按需加载 easy_handeye2 标定结果 (publish.launch.py)
+6. 延迟 3s 后自动使能双臂 (enable_arms)
 
 ### 标定启动文件
 
@@ -796,3 +806,94 @@ MoveItPy 是**进程内**规划库，与 move_group 是**平级替代**，不是
 - [x] 合并 `_execution_trajectory` + `_execute_trajectory` 为一个函数, 直接遍历原始 `trajectory.points`
 - [x] `time.time()` → `time.monotonic()` (单调时钟, 不受 NTP 影响)
 - [x] 新增取消检查 (`goal_handle.is_cancel_requested`), service 可用性检查 (`wait_for_service`), 正确的 `succeed`/`canceled`/`abort` 结果处理
+
+---
+
+## 本次会话修改记录 (点云坐标系修复 + depth_image_proc, 2026-08-04)
+
+### `xtrainer_control/launch/start.launch.py` — realsense 点云 → depth_image_proc
+
+- [x] **根因**: `realsense2_camera` 4.58.2 的 `/camera/<X>/depth/color/points` 在 **depth 坐标系** (frame_id = `camera_X_depth_optical_frame`, H×W = decimation 后的 depth 分辨率), SAM mask 在 color 坐标系, 直接像素对齐错位 → `graspnet_sam_test.py`/`start_grasp_garbage.py` 把 mask resize 后取的点云来自物体旁边的区域
+- [x] **关键陷阱 — 文档过期**: `realsense-ros/README.md:819-820` 写 "The pointcloud, if created, will be based on the aligned depth image" 是**旧文案**, 描述的是 2023-06 PR #2775 (commit `f4c4ff88`) **之前**的行为。该 PR 把 `_align_depth_filter` push 到 `_pc_filter` **后面** (见 `base_realsense_node.cpp:259-263` 的注释 `// Apply PointCloud filter before applying Align-depth as it requires original depth image not aligned-depth image.`), 之后点云改用原始 depth 生成, 但文档没更新
+- [x] 三处 `"pointcloud.enable": "true"` → `"false"` (top/left/right)
+- [x] 保留 `decimation/spatial/temporal/hole_filling/align_depth` 不变 —— `/aligned_depth_to_color/image_raw` 仍然带全套滤波 (filter 链在 align_depth 之前), 这就是"官方点云质量"的源头
+- [x] 新增 `_make_pc_node(camera_name)` helper + 3 个 `depth_image_proc/point_cloud_xyzrgb_node` 实例
+- [x] 每个节点 remap: `depth_registered/image_rect` → `aligned_depth_to_color/image_raw`, `rgb/image_rect_color` → `color/image_raw`, `rgb/camera_info` → `color/camera_info`, `points` → `depth/color/points` (与 realsense 原路径一致)
+- [x] depth_image_proc 用 `PointCloud2Modifier.setPointCloud2FieldsByString(2, "xyz", "rgb")` —— 字段结构与 realsense 一致 (x/y/z/rgb FLOAT32, point_step=16), 下游 `_ros_pointcloud_to_organized` 解析逻辑不变
+- [x] **结果**: 新点云 frame_id = `camera_X_color_optical_frame`, H×W = color 分辨率 (1280×720), SAM mask 1:1 直接作用
+
+### `xtrainer_task/start_grasp_garbage.py` — TF buffer cache_time 10s → 120s
+
+- [x] **根因**: `tf2_ros.Buffer()` 默认 `cache_time=10s`, Step2 单轮 SAM2(~5-10s) + GraspNet(~5s) 累计已超 10s; 若 TF 失败进入 `while` 重试, 累积达数十秒。点云采集时刻 (`cloud_msg.header.stamp`) 的 TF 早已被丢弃 → `Lookup would require extrapolation into the past. Requested time X but the earliest data is at time Y`
+- [x] 与 depth_image_proc 无关: depth_image_proc 在 `point_cloud_xyzrgb.cpp` 里 `cloud_msg->header = depth_msg->header;` 保留 depth 原始时间戳, 新旧流程 stamp 行为一致
+- [x] `self._tf_buffer = tf2_ros.Buffer(cache_time=rclpy.duration.Duration(seconds=120))`
+- [x] 机械臂 Step2 开始时已静止 (Step1 + `time.sleep(0.5)`), 用 cloud stamp 语义正确, 调大 cache 即可
+
+### `xtrainer_task/{start_grasp_garbage,graspnet_sam_test}.py` — `_dilate_mask_3d` 性能优化 (28×)
+
+- [x] **根因**: 旧 `_dilate_mask_3d` 对**整张点云所有 valid 点**调 `cKDTree.query(k=1)` (`idx = np.where(flat_valid)[0]; tree.query(grid[idx], k=1)`), 复杂度 O(N_valid × log N_mask)。换 depth_image_proc 后点云从 640×360 (~23w 点) 升到 1280×720 (~92w 点), 单次从 ~1s 飙到 2-5s, 是 Step2 "Stub7 之后卡住"的真正元凶
+- [x] 新算法: 先 `cv2.dilate` 在 2D 图像域把 mask 扩 N 像素作为候选区 (N 按 `radius_m / median_depth × focal_guess` 自适应, `focal_guess = max(W,H)*0.5`, cap [3, 50]), 再用 cKDTree **仅对候选点** 做精确 3D 距离检查
+- [x] benchmark (1280×720, mask 28575 点, radius=4cm, depth=0.7m): 旧 2462ms → 新 87ms, **加速 28×**, `np.array_equal(旧, 新) == True` (结果完全一致, kernel_size=77, candidates=37848)
+- [x] 同步改 `graspnet_sam_test.py` 保持两份代码一致
+- [x] 清理 10 个 `Stub0..9` 调试打印
+
+### 调试记录: `graspnet_sam_test.py` 误判 c7c4ff44 是 bug
+
+- [x] **现象**: 用户跑 `graspnet_sam_test` 看到 `dets=1 pts=0 grasps=0`, 怀疑 commit `c7c4ff443a0217657014c8e54c998520ded6405a` 改了 dino_wrapper API
+- [x] **真相 1**: c7c4ff44 只改了 `scores` 的多维兜底 (multimask_output=False 时 `scores_arr.reshape(-1)`), 完全没动 `masks` 处理; 而 `graspnet_sam_test.py` 只用 `det.boxes` 和 `det.masks` (line 262/269/272), 根本不读 `det.scores` → 与 c7c4ff44 无关
+- [x] **真相 2**: 命令笔误 — `pointcloud_topic:=/camera/camera_right/...` + `image_topic:=/camera/camera_top/...` 用了**不同相机**。SAM 在 camera_top 检出 bottle, mask 应用到 camera_right 点云 (看不到 bottle) → `sel = mask2d & valid` 全 False → pts=0
+- [x] **修复**: 同一相机 (top 或 right 二选一), 或不指定参数走默认 (camera_top)
+
+### depth_image_proc 关键事实备忘
+
+| 项 | 值 |
+| --- | --- |
+| package | `depth_image_proc` (ROS2 Jazzy 5.0.12, 已安装) |
+| executable | `point_cloud_xyzrgb_node` |
+| 默认订阅 | `depth_registered/image_rect`, `rgb/image_rect_color`, `rgb/camera_info` (扫二进制确认) |
+| 默认发布 | `points` |
+| 同步策略 | `ApproximateTime` (默认) / `ExactTime` (`use_exact_sync:=true`) |
+| 深度单位 | uint16 mm (DepthTraits<uint16_t>::toMeters = ×0.001) |
+| 输出 frame_id | 取自 depth_msg->header (即 aligned_depth_to_color 的 `camera_X_color_optical_frame`) |
+| 字段 | `setPointCloud2FieldsByString(2, "xyz", "rgb")` = x/y/z/rgb FLOAT32, point_step=16 (与 realsense 一致) |
+| 输出 ordered | 是, H×W = depth_msg 维度 = color 分辨率 (因 align_depth) |
+
+### 性能特征 (3 × 30 FPS 独立 Node 估算)
+
+- 输入: 每相机 4.6 MB/帧 (color 2.76MB + aligned_depth 1.84MB), 30fps = 138 MB/s
+- 输出: PointCloud2 14.7 MB/帧, 30fps = 441 MB/s
+- 反投影本身单核 ~5-10% CPU; 主要开销在 PointCloud2 序列化
+- 3 × 30 FPS 独立 Node 估算总体 CPU 30-50%, 不是瓶颈
+- 真正瓶颈是下游 Python 订阅者 (graspnet_sam_test 单进程消化 30Hz × 14.7MB 会吃满 1 核)
+- ComposableNode 对本场景收益主要在内存, 不在 CPU (输出给外部进程仍走 DDS)
+
+### 点云坐标系统一约定 (本次后)
+
+| Topic | frame_id | H×W | 像素 (u,v) 语义 |
+| --- | --- | --- | --- |
+| `/camera/<X>/color/image_raw` | `camera_X_color_optical_frame` | 1280×720 | color 视角 |
+| `/camera/<X>/aligned_depth_to_color/image_raw` | `camera_X_color_optical_frame` | 1280×720 | color 视角 (depth 已 warp) |
+| `/camera/<X>/depth/color/points` (新, depth_image_proc) | `camera_X_color_optical_frame` | 720×1280 | color 视角, 与 SAM mask 1:1 |
+| ~~`/camera/<X>/depth/color/points` (旧, realsense)~~ | ~~`camera_X_depth_optical_frame`~~ | ~~360×640~~ | ~~depth 视角, 与 SAM mask 错位~~ |
+
+### 排错决策树补充 (SAM 点云分割类)
+
+1. **`pts=0` 但 `dets>0`**: 检查 `image_topic` 和 `pointcloud_topic` 是否同一相机 (`ros2 topic info` 看 publisher); 检查 frame_id 是否一致
+2. **`pts` 非零但与物体位置错位**: 点云 frame_id 是 `depth_optical_frame` 还是 `color_optical_frame`? 旧 realsense 自带点云用前者, 必错位
+3. **SAM mask 在 OpenCV 窗口正确但点云跟不上**: 检查点云 H×W 是否等于 color 分辨率; 检查 `_select_mask` 里 resize 是否触发 (触发即说明点云网格不在 color 域)
+4. **Step2 卡数十秒后报 TF extrapolation into the past**: TF buffer cache_time 10s < SAM+GraspNet 推理时间, 调到 120s
+5. **Step2 Stub6→Stub7 卡数秒**: `_dilate_mask_3d` 旧算法 O(N_valid); 优化版用 cv2.dilate 粗筛 + cKDTree 精检候选点
+6. **怀疑某 commit 改了 dino_wrapper API**: 先 grep `det\.` 看实际用了哪些字段, c7c4ff44 只改 scores, masks 处理未动
+
+### 陷阱表 (本次新增)
+
+| 陷阱 | 后果 | 对策 |
+| --- | --- | --- |
+| realsense-ros 4.58.2 README 与代码不符 (PR #277 后文档过期) | 误以为 `/depth/color/points` 用 aligned depth | 看 `base_realsense_node.cpp:259` 注释, 用 depth_image_proc 替代 |
+| depth_image_proc 默认 topic 名 (`depth_registered/image_rect` 等) 与 realsense 不匹配 | 订阅 0 Hz | remap 四个 topic: `depth_registered/image_rect` → `aligned_depth_to_color/image_raw`, `rgb/image_rect_color` → `color/image_raw`, `rgb/camera_info` → `color/camera_info`, `points` → `depth/color/points` |
+| depth_image_proc 字段命名 | 下游解析失败? | 不会, depth_image_proc 用 `setPointCloud2FieldsByString(2, "xyz", "rgb")` 与 realsense 一致 |
+| depth_image_proc 输出在 color 坐标系 | 与旧 realsense 点云数值差 baseline 视差 | 现有脚本 (`start_open_bottle.py`/`start_insert_straw.py`/`start_grasp_garbage.py`) 本来就假设 `color_optical_frame`, 反而修复了长期 bug |
+| TF buffer 默认 cache 10s vs SAM+GraspNet 15s+ | "Lookup would require extrapolation into the past" | `Buffer(cache_time=Duration(seconds=120))` |
+| `_dilate_mask_3d` 对所有 valid 点 cKDTree.query | 1280×720 下 2-5s | cv2.dilate 自适应 kernel 粗筛, 仅对候选点 query, 加速 28× |
+| 命令笔误: image_topic 和 pointcloud_topic 不同相机 | `pts=0` 但 `dets>0`, 误判为 API bug | 同一相机, 或加 frame_id sanity check |
+| colcon `--symlink-install` ament_python 残留 stale build/lib | 改源码不生效 | `rm -rf build/<pkg> install/<pkg>` 后重新 build |

@@ -6,6 +6,33 @@ from launch.actions import IncludeLaunchDescription, TimerAction
 from launch_ros.actions import Node
 
 
+def _make_pc_node(camera_name: str) -> Node:
+    """为指定相机创建 depth_image_proc/point_cloud_xyzrgb 节点。
+
+    用 /aligned_depth_to_color/image_raw (realsense 已施加 decimation/spatial/
+    temporal/hole_filling 四重滤波并对齐到 color 像素网格) + color + color/camera_info
+    生成有序彩色点云，发布到与 realsense 原路径一致的 /camera/<name>/depth/color/points。
+
+    与 realsense 自带点云的区别:
+      - frame_id: camera_<name>_color_optical_frame (而非 depth_optical_frame)
+      - H×W: color 分辨率 (而非 decimation 后的 depth 分辨率)
+      - SAM 在 color 域的 mask 可以 1:1 直接作用到点云网格
+    """
+    return Node(
+        package="depth_image_proc",
+        executable="point_cloud_xyzrgb_node",
+        name=f"{camera_name}_point_cloud_xyzrgb",
+        namespace=f"/camera/{camera_name}",
+        remappings=[
+            ("depth_registered/image_rect", "aligned_depth_to_color/image_raw"),
+            ("rgb/image_rect_color", "color/image_raw"),
+            ("rgb/camera_info", "color/camera_info"),
+            ("points", "depth/color/points"),
+        ],
+        output="screen",
+    )
+
+
 def generate_launch_description():
     # ================================================================
     # XTrainer 机械臂驱动
@@ -62,7 +89,9 @@ def generate_launch_description():
             "enable_infra": "false",
             "enable_infra1": "false",
             # --- 点云 ---
-            "pointcloud.enable": "true",
+            # 关闭 realsense 自带点云，改用下方 depth_image_proc 生成
+            # (realsense 的 /depth/color/points 在 depth 坐标系，与 SAM mask 错位)
+            "pointcloud.enable": "false",
             "pointcloud.ordered_pc": "true",
             "pointcloud.allow_no_texture_points": "false",
             "decimation_filter.enable":"true",
@@ -105,7 +134,9 @@ def generate_launch_description():
             "enable_infra": "false",
             "enable_infra1": "false",
             # --- 点云 ---
-            "pointcloud.enable": "true",
+            # 关闭 realsense 自带点云，改用下方 depth_image_proc 生成
+            # (realsense 的 /depth/color/points 在 depth 坐标系，与 SAM mask 错位)
+            "pointcloud.enable": "false",
             "pointcloud.ordered_pc": "true",
             "pointcloud.allow_no_texture_points": "false",
             "decimation_filter.enable":"true",
@@ -148,7 +179,9 @@ def generate_launch_description():
             "enable_infra": "false",
             "enable_infra1": "false",
             # --- 点云 ---
-            "pointcloud.enable": "true",
+            # 关闭 realsense 自带点云，改用下方 depth_image_proc 生成
+            # (realsense 的 /depth/color/points 在 depth 坐标系，与 SAM mask 错位)
+            "pointcloud.enable": "false",
             "pointcloud.ordered_pc": "true",
             "pointcloud.allow_no_texture_points": "false",
             "decimation_filter.enable":"true",
@@ -256,6 +289,10 @@ def generate_launch_description():
             realsense_camera_top,
             realsense_camera_left,
             realsense_camera_right,
+            # depth_image_proc 点云节点 (替代 realsense 自带点云，在 color 坐标系下生成)
+            _make_pc_node("camera_top"),
+            _make_pc_node("camera_left"),
+            _make_pc_node("camera_right"),
             enable_arms,
         ])
 
