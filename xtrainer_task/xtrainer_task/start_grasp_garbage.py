@@ -15,6 +15,7 @@ import os
 import sys
 import threading
 import time
+import traceback
 from collections import deque
 from typing import Dict, Optional, Tuple
 
@@ -33,6 +34,7 @@ from rclpy.callback_groups import (MutuallyExclusiveCallbackGroup,
                                    ReentrantCallbackGroup)
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
+from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
 from scipy.spatial.transform import Rotation as R
 from sensor_msgs.msg import CameraInfo, Image, PointCloud2
 from visualization_msgs.msg import Marker
@@ -71,13 +73,21 @@ _GRIPPER = {
 
 # ── Step 2 Any Grasp: GroundedSAM2 + GraspNet ──────────────────────────
 _GRASP_PC_TOPIC_TEMPLATE = "/camera/{name}/depth/color/points"
-_GRASP_PROMPT = "bottle."
+_GRASP_PROMPT = "main object."
 _GRASP_NUM_POINT = 20000
 _GRASP_NUM_VIEW = 300
 # 夹爪长度(depth)上限, 单位 m, 过滤 depth>此值的抓取。9.5cm=0.095
 _GRASP_MAX_DEPTH = 0.095
 _GRASP_TOP_K = 10
 _GRASP_MIN_POINTS = 50
+
+# ── Desk Detect: GroundingDINO + SAM2 白色桌面 → ROI → 自动掩码物体分割 ─
+_DESK_CAMERA = "camera_top"
+_DESK_PROMPT = "white square."
+_DESK_ROI_SHRINK_PX = 0           # ROI 整体向内缩 x 像素 (正值缩小)
+_DESK_MIN_AREA_RATIO = 0.002      # 自动掩码面积下限 (相对 ROI 面积比例)
+_DESK_DROP_LARGEST_MASK = True    # 排除面积最大的 mask (桌子表面本身)
+_DESK_WINDOW_NAME = "Desk Object Detect"
 
 # GraspNet 夹爪坐标系 → 机械臂 tip frame 的轴重映射 (列置换)。
 #   graspnet: +X=接近方向, +Y=手指开合, +Z=掌心法向
@@ -124,6 +134,18 @@ class XTrainerTask(Node):
             device='cuda', box_threshold=0.35, text_threshold=0.25,
         )
 
+        # SAM2 自动掩码生成器 (复用 DinoWrapper 加载的 sam2_model 权重)
+        # 用于在白色桌面 ROI 内自动切分桌上各个物体
+        self._amg = SAM2AutomaticMaskGenerator(
+            model=self.dino.sam2_model,
+            points_per_side=16,
+            pred_iou_thresh=0.8,
+            stability_score_thresh=0.95,
+            min_mask_region_area=0,
+            box_nms_thresh=0.7,
+            output_mode="binary_mask",
+        )
+
         # 夹爪
         self.gripper = GripperController(self)
 
@@ -149,6 +171,12 @@ class XTrainerTask(Node):
         self._vis_lock = threading.Lock()
         self._vis_pending = None
         self._vis_thread = None
+
+        # ── 桌面物体检测最新结果 (launch 循环每帧刷新, 供外部读取) ──
+        self._latest_desk_objects = None
+
+        # ARM
+        self.pick_arm = "Arm1"
 
         # ── TF2 缓冲与监听器 ──
         # cache_time 调大到 120s: Step2 的 SAM2+GraspNet 单轮推理 ~15s,
@@ -223,103 +251,53 @@ class XTrainerTask(Node):
         self._launch_timer.cancel()
         self.launch()
 
-    def launch(self):
-
-        self.gripper.open_both()
-
-        pick_arm = "Arm1"
-
-        """
-        Step 1: Find Object and Approach
-        """
-
-        # Panning Loop
-        while rclpy.ok():
-            # Capture Loop
-            while rclpy.ok():
-                image_top = self.get_latest_color("camera_top")
-                
-                if image_top is None:
-                    self.get_logger().error("No top camera image available.")
-                    time.sleep(0.05)
-                    continue
-
-                result = self.dino.detect(image_top, "bottle")
-
-                if len(result.boxes) == 0:
-                    self.get_logger().warn("No bottle detected in top camera.")
-                    cv2.imshow("Detection Result", image_top)
-                    cv2.waitKey(1)
-                    time.sleep(0.05)
-                    continue
-
-                try:
-                    annotated_image = self.dino.annotate(image_top, result, draw_mask=True)
-                except Exception as ex:
-                    self.get_logger().warn("Bottle annotate failed, showing original image")
-                    self.get_logger().log(ex)
-                    annotated_image = image_top
-
-                cv2.imshow("Detection Result", annotated_image)
-                cv2.waitKey(10)
-
-                break
-
-            mid_x = (result.boxes[0, 0] + result.boxes[0, 2]) / 2
-            mid_y = (result.boxes[0, 1] + result.boxes[0, 3]) / 2
-
-            self.get_logger().info(f"Mid pixel: ({mid_x}, {mid_y})")
+    def step_approach_object(self,camera_name, mid_x, mid_y):
+        mid_coordinate = self.pixel_to_base_link(camera_name, mid_x, mid_y)             
+        if mid_coordinate is None:
+            self.get_logger().error("Failed to compute 3D coordinate of object center.")
+            return False
             
-            mid_coordinate = self.pixel_to_base_link("camera_top", mid_x, mid_y)
-            
-            if mid_coordinate is None:
-                self.get_logger().error("Failed to compute 3D coordinate of bottle center.")
-                continue
+        self._publish_detection_marker(mid_coordinate)
 
-            self._publish_detection_marker(mid_coordinate)
+        # Pose gripper down and 5cm above the object center
+        pose_prepare = Pose()
+        pose_prepare.position.x = mid_coordinate[0]
+        pose_prepare.position.y = mid_coordinate[1]
+        pose_prepare.position.z = mid_coordinate[2] + 0.05
+        pose_prepare.orientation.x = 0.9999995231628418
+        pose_prepare.orientation.y = 7.932441803859547e-06
+        pose_prepare.orientation.z = 0.001016218215227127
+        pose_prepare.orientation.w = 9.80220761448436e-07
 
-            pose_prepare = Pose()
-            pose_prepare.position.x = mid_coordinate[0]
-            pose_prepare.position.y = mid_coordinate[1]
-            pose_prepare.position.z = mid_coordinate[2] + 0.05
-            pose_prepare.orientation.x = 0.9999995231628418
-            pose_prepare.orientation.y = 7.932441803859547e-06
-            pose_prepare.orientation.z = 0.001016218215227127
-            pose_prepare.orientation.w = 9.80220761448436e-07
+        self.get_logger().info(f"############# Move to pose {pose_prepare} ###############")
 
-            self.get_logger().info(f"############# Move to pose {pose_prepare} ###############")
-
-
-            for _ in range(2):
-                # move arm
-                plan_result = self.mover.plan_pose(pick_arm, pose_prepare, planner=Planner.ompl,tip_link=_ARM_TIP[pick_arm])
-
-                if plan_result is None:
-                    self.get_logger().error(f"################### Moveit {pick_arm} Planning Failed #################")
-                    if pick_arm == "Arm1":
-                        pick_arm = "Arm2"
-                    else:
-                        pick_arm = "Arm1"
-                else:
-                    break
+        # Try every arm
+        for _ in range(2):
+            # move arm
+            plan_result = self.mover.plan_pose(self.pick_arm, pose_prepare, planner=Planner.ompl,tip_link=_ARM_TIP[self.pick_arm])
 
             if plan_result is None:
-                continue
+                self.get_logger().error(f"################### Moveit {self.pick_arm} Planning Failed #################")
+                if self.pick_arm == "Arm1":
+                    self.pick_arm = "Arm2"
+                else:
+                    self.pick_arm = "Arm1"
             else:
                 break
 
-        self.mover.execute(plan_result.trajectory)
+        if plan_result is not None:
+            self.mover.execute(plan_result.trajectory)
+            time.sleep(0.5)
+            return True
+        else:
+            return False
 
-        time.sleep(0.5)
-
-        """
-        Step 2: Any Grasp
-        """
+    def step_any_grasp(self):
         # 夹爪保持张开, 不做闭合/提升。
         grasp_success = False
         while rclpy.ok() and not grasp_success:
             # ── 2a. GroundingDINO + SAM2 识别物体 ──────────────
-            image = self.get_latest_color(_ARM_CAM[pick_arm])
+            image = self.get_latest_color(_ARM_CAM[self.pick_arm])
             if image is None:
                 self.get_logger().error("No top camera image available.")
                 time.sleep(0.05)
@@ -345,7 +323,7 @@ class XTrainerTask(Node):
             # ── 2b. 驱动发布的有序彩色点云 → 物体点子集 ────────
             with self._snapshots_lock:
                 cloud_msg = self._snapshots.get(
-                    _ARM_CAM[pick_arm], {}
+                    _ARM_CAM[self.pick_arm], {}
                 ).get("points")
 
             if cloud_msg is None:
@@ -364,15 +342,21 @@ class XTrainerTask(Node):
                 time.sleep(0.05)
                 continue
 
-            mask2d = self._select_mask(result, H, W)
+            valid = np.isfinite(xyz).all(axis=2) & (xyz[..., 2] > 0)
+
+            # 按点云高度中位数从低到高排序, 选最低 (z 最小) 的单个检测 mask
+            mask2d = self._pick_lowest_height_mask(result, xyz, valid, H, W)
             if mask2d is None:
+                self.get_logger().warn(
+                    "No usable mask after height selection."
+                )
+                time.sleep(0.05)
                 continue
 
             mask2d = self._dilate_mask_3d(
                 mask2d, xyz, self._mask_dilation_m
             )
 
-            valid = np.isfinite(xyz).all(axis=2) & (xyz[..., 2] > 0)
             sel = mask2d & valid
             pts = xyz[sel]
             cols = rgb[sel]
@@ -395,7 +379,7 @@ class XTrainerTask(Node):
             # ── 2d. 过滤/排序 → 取前 10 → TF 变换到 base_link ──
             # 直接以相机 color optical frame 作为 TF 源, 用点云时间戳对齐
             # (eye-in-hand 相机随手臂移动, 必须用点云采集时刻的 TF)。
-            camera_name = _ARM_CAM[pick_arm]
+            camera_name = _ARM_CAM[self.pick_arm]
             optical_frame = _CAMERA_OPTICAL_FRAMES[camera_name]
             grasp_poses, gripper_geos, grasp_geos_aligned = (
                 self._grasp_group_to_base_poses(
@@ -425,11 +409,11 @@ class XTrainerTask(Node):
                 )
                 self.get_logger().info(
                     f"Trying grasp candidate {idx + 1}/{len(grasp_poses)} "
-                    f"(score={score:.3f}) for {pick_arm} ..."
+                    f"(score={score:.3f}) for {self.pick_arm} ..."
                 )
                 plan_grasp = self.mover.plan_pose(
-                    pick_arm, grasp_pose, planner=Planner.pilz_ptp,
-                    tip_link=_ARM_TIP[pick_arm],
+                    self.pick_arm, grasp_pose, planner=Planner.pilz_ptp,
+                    tip_link=_ARM_TIP[self.pick_arm],
                 )
                 if plan_grasp is None:
                     self.get_logger().warn(
@@ -445,7 +429,7 @@ class XTrainerTask(Node):
 
                 grasp_success = True
                 self.get_logger().info(
-                    f"Step 2 completed: grasped with {pick_arm} "
+                    f"Step 2 completed: grasped with {self.pick_arm} "
                     f"(candidate {idx + 1}, score={score:.3f})."
                 )
                 self._show_success_grasp_o3d(
@@ -460,7 +444,276 @@ class XTrainerTask(Node):
                 )
 
         # ── 2e. Gripper close ──
-        self.gripper.close(_GRIPPER[pick_arm])
+        self.gripper.close(_GRIPPER[self.pick_arm])
+
+
+    def launch(self):
+
+        self.gripper.open_both()
+        self.get_logger().info("Gripper opened, ready to detect desk objects.")
+
+        result = self.step_detect_desk_objects()[0]
+        roi = result["roi"]
+        first_mid = ((roi[0] + roi[2]) // 2, (roi[1] + roi[3]) // 2)
+        self.get_logger().info(f"First object ROI: {roi}, mid: {first_mid}")
+        self.step_approach_object("camera_top",first_mid[0], first_mid[1])
+
+        # 末端抓取: GroundingDINO "main object." → SAM2 切分 → 按高度中位数
+        # 从低到高排序 → 选最低的物体点云 → GraspNet 抓取
+        self.step_any_grasp()
+
+    # ------------------------------------------------------------------
+    # Desk Detect: GroundingDINO + SAM2 → ROI → SAM2AutomaticMaskGenerator
+    # ------------------------------------------------------------------
+    def step_detect_desk_objects(self):
+        """单帧桌面检测 + 物体点云高度中位数排序: 仿照 detect_desk_object.py。
+
+        流程:
+            1. 取 ``_DESK_CAMERA`` 最新彩色帧与有序彩色点云
+            2. GroundingDINO 检测 ``_DESK_PROMPT`` (默认 "white square.")
+               → SAM2 切分得到白色桌面的 mask
+            3. 由 mask 外接矩形 (±``_DESK_ROI_SHRINK_PX``) 得到 ROI
+            4. 在 ROI 裁剪区域内运行 ``SAM2AutomaticMaskGenerator``
+               → 桌上物体 mask 列表 (按面积降序, #0 通常是桌面本身)
+            5. 排除面积最大的 mask (``_DESK_DROP_LARGEST_MASK``)
+            6. 把每个物体的 mask 映射到点云, 取 z 中位数作为高度
+            7. 按 ``(height_median, index)`` 升序排序 (z 越小=越靠近相机=
+               物理越高, None 排末尾), 在 OpenCV 窗口显示
+
+        Returns
+        -------
+        list[dict] or None or False
+            - ``False``: 用户按 'q' 请求退出循环
+            - ``None``: 无彩色帧, 跳过本轮
+            - ``list[dict]``: 排序后的物体列表, 每项含:
+                - ``index``: int, 原始序号 (面积降序, 去桌面后的 0 基)
+                - ``roi``: tuple (x0, y0, x1, y1), 全图坐标 bbox
+                - ``mask``: np.ndarray (H, W) bool, 全图掩码
+                - ``height_median``: float or None, 相机光学系 z 中位数 (m)
+        """
+        # ── 1. 取最新彩色帧 ──────────────────────────────────
+        image = self.get_latest_color(_DESK_CAMERA)
+        if image is None:
+            self.get_logger().warn(
+                f"[{_DESK_CAMERA}] no color frame yet",
+                throttle_duration_sec=2.0,
+            )
+            return None
+
+        H, W = image.shape[:2]
+
+        # ── 2. GroundingDINO + SAM2 检测桌面 ─────────────────
+        det = self.dino.detect(image, _DESK_PROMPT)
+        table_mask, roi = self._compute_table_roi(det, H, W)
+
+        # ── 3. ROI 内 SAM2 自动掩码生成 ──────────────────────
+        anns = []
+        if roi is not None:
+            anns = self._run_auto_masks(image, roi)
+
+        # ── 4. 排除面积最大的 mask (桌面), 剩余为各个物体 ───
+        if _DESK_DROP_LARGEST_MASK and len(anns) > 1:
+            objects = anns[1:]
+        else:
+            objects = anns
+
+        # ── 5. 取点云 → 计算每个物体 z 中位数 (高度) ─────────
+        xyz = None
+        valid = None
+        H_pc = W_pc = 0
+        with self._snapshots_lock:
+            cloud_msg = self._snapshots.get(_DESK_CAMERA, {}).get("points")
+        if cloud_msg is not None:
+            try:
+                xyz, _rgb, H_pc, W_pc = self._ros_pointcloud_to_organized(
+                    cloud_msg
+                )
+                valid = np.isfinite(xyz).all(axis=2) & (xyz[..., 2] > 0)
+            except Exception as exc:
+                self.get_logger().warn(
+                    f"[{_DESK_CAMERA}] point cloud parse failed: {exc}",
+                    throttle_duration_sec=2.0,
+                )
+                xyz = None
+
+        # ── 6. 构建结果列表 (index, roi, mask, height_median) ─
+        results = []
+        for i, a in enumerate(objects):
+            mask = a["segmentation_full"]
+            height_median = None
+            if xyz is not None and valid is not None:
+                mask_pc = mask
+                if mask_pc.shape != (H_pc, W_pc):
+                    mask_pc = cv2.resize(
+                        mask.astype(np.uint8), (W_pc, H_pc),
+                        interpolation=cv2.INTER_NEAREST,
+                    ).astype(bool)
+                sel = mask_pc & valid
+                if np.any(sel):
+                    height_median = float(
+                        np.median(xyz[sel][:, 2])
+                    )
+            results.append({
+                "index": i,
+                "roi": tuple(int(v) for v in a["bbox_xyxy_full"]),
+                "mask": mask,
+                "height_median": height_median,
+            })
+
+        # ── 7. 排序: height_median 升序 (z 越小=物理越高在前),
+        #         None 排末尾; 同值按 index ───────────────────
+        def _sort_key(r):
+            h = r["height_median"]
+            if h is None:
+                return (1, 0.0, r["index"])
+            return (0, h, r["index"])
+
+        results.sort(key=_sort_key)
+
+        # ── 8. 日志 ──────────────────────────────────────────
+        if results:
+            self.get_logger().info(
+                f"—— {_DESK_CAMERA} desk objects: {len(results)} "
+                f"(sorted by height) ——"
+            )
+            for rank, r in enumerate(results):
+                h = r["height_median"]
+                h_str = f"{h:.4f}" if h is not None else "N/A"
+                x0, y0, x1, y1 = r["roi"]
+                self.get_logger().info(
+                    f"rank={rank} idx={r['index']} "
+                    f"roi=({x0},{y0})-({x1},{y1}) height_z={h_str}"
+                )
+
+        # ── 9. OpenCV 可视化 ────────────────────────────────
+        display = self._draw_desk_objects(image, table_mask, roi, results)
+        cv2.putText(
+            display,
+            f"dets={len(det.boxes)} roi={'yes' if roi is not None else 'no'} "
+            f"objects={len(results)}",
+            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2,
+        )
+        cv2.imshow(_DESK_WINDOW_NAME, display)
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q'):
+            self.get_logger().info(
+                "Pressed 'q' in OpenCV window, exiting desk detect loop …"
+            )
+            return False
+        return results
+
+    def _compute_table_roi(self, det, H: int, W: int):
+        """由 GroundingDINO 检测结果的 mask 计算白色桌面 ROI。
+
+        Returns
+        -------
+        tuple[np.ndarray, tuple] or tuple[None, None]
+            ``(mask2d, (x0, y0, x1, y1))``: ``mask2d`` 为 ``(H, W)`` bool 桌面掩码,
+            roi 为按 ``_DESK_ROI_SHRINK_PX`` 内缩后的外接矩形 (全图坐标, 已 clamp)。
+        """
+        if len(det.boxes) == 0 or len(det.masks) == 0:
+            return None, None
+
+        mask2d = np.any(det.masks, axis=0)
+        if not np.any(mask2d):
+            return None, None
+
+        ys, xs = np.where(mask2d)
+        x0, y0, x1, y1 = xs.min(), ys.min(), xs.max(), ys.max()
+
+        s = int(_DESK_ROI_SHRINK_PX)
+        x0, y0 = x0 + s, y0 + s
+        x1, y1 = x1 - s, y1 - s
+
+        x0 = max(0, min(W - 1, x0))
+        y0 = max(0, min(H - 1, y0))
+        x1 = max(x0 + 1, min(W - 1, x1))
+        y1 = max(y0 + 1, min(H - 1, y1))
+        return mask2d, (int(x0), int(y0), int(x1), int(y1))
+
+    def _run_auto_masks(self, frame: np.ndarray, roi: tuple):
+        """在 ROI 裁剪区域内运行 SAM2AutomaticMaskGenerator。
+
+        Parameters
+        ----------
+        frame : np.ndarray
+            BGR 全图
+        roi : tuple
+            ``(x0, y0, x1, y1)`` 全图坐标
+
+        Returns
+        -------
+        list[dict]
+            每个元素含:
+                - segmentation_full: (H, W) bool 全图坐标掩码
+                - bbox_xyxy_full: (x1, y1, x2, y2) 全图坐标 bbox
+                - bbox (ROI 局部 XYWH), area, predicted_iou, stability_score
+            按面积降序排列 (#0 通常是桌子表面本身)。
+        """
+        x0, y0, x1, y1 = roi
+        crop = frame[y0:y1 + 1, x0:x1 + 1]
+        roi_area = crop.shape[0] * crop.shape[1]
+        min_area = int(_DESK_MIN_AREA_RATIO * roi_area)
+
+        anns = self._amg.generate(crop)
+
+        out = []
+        for a in anns:
+            if a["area"] < min_area:
+                continue
+            bx, by, bw, bh = a["bbox"]
+            a["bbox_xyxy_full"] = [x0 + bx, y0 + by, x0 + bx + bw, y0 + by + bh]
+            full = np.zeros((frame.shape[0], frame.shape[1]), dtype=bool)
+            full[y0:y1 + 1, x0:x1 + 1] = a["segmentation"]
+            a["segmentation_full"] = full
+            out.append(a)
+
+        out.sort(key=lambda a: a["area"], reverse=True)
+        return out
+
+    def _draw_desk_objects(
+        self, display: np.ndarray, table_mask, roi, results
+    ) -> np.ndarray:
+        """OpenCV 可视化: 桌面 mask (绿) + ROI (黄) + 每个物体轮廓/bbox/编号/高度。
+
+        Parameters
+        ----------
+        results : list[dict]
+            已排序的物体列表, 每项含 index/roi/mask/height_median。
+            显示标签用排序后的 rank (与返回顺序一致)。
+        """
+        if table_mask is not None:
+            overlay = display.copy()
+            overlay[table_mask] = (0, 255, 0)
+            display = cv2.addWeighted(display, 0.7, overlay, 0.3, 0)
+
+        if roi is not None:
+            x0, y0, x1, y1 = roi
+            cv2.rectangle(display, (x0, y0), (x1, y1), (0, 255, 255), 2)
+
+        for rank, r in enumerate(results):
+            mask = r["mask"]
+            mask_u8 = mask.astype(np.uint8)
+            cnts, _ = cv2.findContours(
+                mask_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            )
+            cv2.drawContours(display, cnts, -1, (255, 0, 0), 2)
+
+            x0, y0, x1, y1 = r["roi"]
+            cv2.rectangle(display, (x0, y0), (x1, y1), (255, 128, 0), 1)
+            cx = int((x0 + x1) / 2)
+            cy = int((y0 + y1) / 2)
+            h = r["height_median"]
+            h_str = f"{h:.3f}" if h is not None else "NA"
+            cv2.putText(
+                display, f"#{rank} h={h_str}", (cx, cy),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2,
+            )
+
+        return display
+
+
+        
 
 
     # ------------------------------------------------------------------
@@ -588,6 +841,73 @@ class XTrainerTask(Node):
             masks = resized
 
         return np.any(masks, axis=0)
+
+    def _pick_lowest_height_mask(
+        self, result, xyz: np.ndarray, valid: np.ndarray,
+        H_pc: int, W_pc: int,
+    ):
+        """从检测结果中选出点云高度中位数最低 (z 最小) 的单个 mask。
+
+        对每个 detection mask 映射到点云 (必要时 INTER_NEAREST resize),
+        计算其 z 中位数 (相机光学系深度, m), 升序排序后返回最低 (z 最小)
+        的 mask。无有效 mask 返回 None。
+
+        Parameters
+        ----------
+        result : DetectionResult
+            GroundingDINO + SAM2 检测结果, ``result.masks`` 为 (N, H, W) bool。
+        xyz : np.ndarray
+            (H_pc, W_pc, 3) 有序点云坐标。
+        valid : np.ndarray
+            (H_pc, W_pc) bool, 有效点标记 (finite & z>0)。
+        H_pc, W_pc : int
+            点云高/宽。
+
+        Returns
+        -------
+        np.ndarray or None
+            (H_pc, W_pc) bool 单 mask (最低高度者); 无候选返回 None。
+        """
+        if len(result.boxes) == 0 or len(result.masks) == 0:
+            return None
+
+        masks = result.masks  # (N, H_img, W_img)
+        candidates = []  # (orig_index, mask_pc, height_median)
+        for i in range(masks.shape[0]):
+            m = masks[i]
+            if m.shape != (H_pc, W_pc):
+                m_pc = cv2.resize(
+                    m.astype(np.uint8), (W_pc, H_pc),
+                    interpolation=cv2.INTER_NEAREST,
+                ).astype(bool)
+            else:
+                m_pc = m
+            sel = m_pc & valid
+            if np.any(sel):
+                h_med = float(np.median(xyz[sel][:, 2]))
+            else:
+                h_med = None
+            candidates.append((i, m_pc, h_med))
+
+        if not candidates:
+            return None
+
+        # 升序: height_median (z) 最小在前; None 排末尾; 同值按 orig index
+        def _key(c):
+            h = c[2]
+            if h is None:
+                return (1, 0.0, c[0])
+            return (0, h, c[0])
+
+        candidates.sort(key=_key)
+
+        chosen = candidates[0]
+        h_str = f"{chosen[2]:.4f}" if chosen[2] is not None else "NA"
+        self.get_logger().info(
+            f"Pick lowest-height mask: idx={chosen[0]} "
+            f"height_z={h_str} (among {len(candidates)} dets)"
+        )
+        return chosen[1]
 
     @staticmethod
     def _dilate_mask_3d(mask2d, xyz, radius_m: float):
