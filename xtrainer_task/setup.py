@@ -35,10 +35,13 @@ setup(
             'start_insert_straw = xtrainer_task.start_insert_straw:main',
             'start_grasp_garbage = xtrainer_task.start_grasp_garbage:main',
             'dino_test = xtrainer_task.dino_test:main',
+            'dino_contour_test = xtrainer_task.dino_contour_test:main',
+            'detect_desk_object = xtrainer_task.detect_desk_object:main',
             'read_pose = xtrainer_task.read_pose:main',
             'goto_pose = xtrainer_task.goto_pose:main',
             'graspnet_test = xtrainer_task.graspnet_test:main',
             'graspnet_sam_test = xtrainer_task.graspnet_sam_test:main',
+            'graspnet_sam_region_test = xtrainer_task.graspnet_sam_region_test:main',
         ],
     },
 )

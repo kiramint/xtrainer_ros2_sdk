@@ -418,6 +418,7 @@ class XTrainerTask(Node):
 
             # ── 2e. 从 score 最高开始逐个 plan, 失败换下一个 ──
             for idx, (grasp_pose, score) in enumerate(grasp_poses):
+                grasp_pose = self._tip_toward_tcp_offset(grasp_pose, -0.03)
                 self._publish_detection_marker(
                     (grasp_pose.position.x, grasp_pose.position.y,
                      grasp_pose.position.z)
@@ -458,13 +459,45 @@ class XTrainerTask(Node):
                     "re-detecting."
                 )
 
-            # ── 2e. Gripper close ──
-            self.gripper.close(_GRIPPER[pick_arm])
+        # ── 2e. Gripper close ──
+        self.gripper.close(_GRIPPER[pick_arm])
 
 
     # ------------------------------------------------------------------
     # Step 2 Any Grasp: 点云解析 + GraspNet 相关
     # ------------------------------------------------------------------
+    @staticmethod
+    def _tip_toward_tcp_offset(pose: Pose, offset_m: float) -> Pose:
+        """将 tip 规划点沿 pose 局部 -Z (tip→tcp 方向) 平移 offset_m 米。
+
+        URDF 中 tip 位于 L*_6 局部 Z 轴 0.195 m, tcp 位于 0.14568 m,
+        即 tcp 在 tip 后方 0.04932 m 处。offset_m 取 [0, 0.04932] 时,
+        结果等价于"把规划目标放在 tip 与 tcp 之间"——配合 tip_link 规划后,
+        真实抓取中心将落在偏移前的目标点上 (tip 偏高低、tcp 偏高, 取中间值即可)。
+
+        Parameters
+        ----------
+        pose : Pose
+            原 tip 规划位姿 (base_link 下).
+        offset_m : float
+            tip 往 tcp 方向偏移的米数 (正值 → 向 tcp 后退).
+
+        Returns
+        -------
+        Pose
+            平移后的新位姿, 姿态保持不变.
+        """
+        z_axis = R.from_quat([
+            pose.orientation.x, pose.orientation.y,
+            pose.orientation.z, pose.orientation.w,
+        ]).apply([0.0, 0.0, 1.0])
+        out = Pose()
+        out.position.x = pose.position.x - z_axis[0] * offset_m
+        out.position.y = pose.position.y - z_axis[1] * offset_m
+        out.position.z = pose.position.z - z_axis[2] * offset_m
+        out.orientation = pose.orientation
+        return out
+    
     @staticmethod
     def _ros_pointcloud_to_organized(msg: PointCloud2):
         """解析驱动发布的有序彩色点云 → (xyz(H,W,3), rgb(H,W,3), H, W)。

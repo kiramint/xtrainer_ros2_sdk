@@ -64,16 +64,20 @@ class DinoWrapper:
         box_threshold: float = 0.35,
         text_threshold: float = 0.25,
         multimask_output: bool = False,
+        use_sam: bool = True,
         device: Optional[str] = None,
     ):
         self.box_threshold = box_threshold
         self.text_threshold = text_threshold
         self.multimask_output = multimask_output
+        self.use_sam = use_sam
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
 
-        # ── 加载 SAM2 ────────────────────────────────────────
-        self.sam2_model = build_sam2(sam2_config, sam2_checkpoint, device=self.device)
-        self.sam2_predictor = SAM2ImagePredictor(self.sam2_model)
+        # ── 加载 SAM2 (use_sam=False 时跳过, 只做 GroundingDINO) ─
+        self.sam2_predictor = None
+        if self.use_sam:
+            self.sam2_model = build_sam2(sam2_config, sam2_checkpoint, device=self.device)
+            self.sam2_predictor = SAM2ImagePredictor(self.sam2_model)
 
         # ── 加载 Grounding DINO ──────────────────────────────
         self.grounding_model = load_model(
@@ -139,8 +143,9 @@ class DinoWrapper:
         """
         h, w = image.shape[:2]
 
-        # ── 1. SAM2 set_image ───────────────────────────────
-        self.sam2_predictor.set_image(image)
+        # ── 1. SAM2 set_image (use_sam=False 时跳过) ─────────
+        if self.sam2_predictor is not None:
+            self.sam2_predictor.set_image(image)
 
         # ── 2. Grounding DINO 检测 ──────────────────────────
         image_tensor = self._bgr_to_gdino_tensor(image)
@@ -167,7 +172,17 @@ class DinoWrapper:
         boxes_ccwh = boxes_ccwh * torch.Tensor([w, h, w, h])
         input_boxes = box_convert(boxes=boxes_ccwh, in_fmt="cxcywh", out_fmt="xyxy").numpy()
 
-        # ── 3. SAM2 分割 (bfloat16 autocast) ────────────────
+        # ── 3. SAM2 分割 (use_sam=False 时返回空 mask) ──────
+        if self.sam2_predictor is None:
+            return DetectionResult(
+                boxes=input_boxes,
+                masks=np.empty((0, h, w), dtype=bool),
+                scores=confidences.tolist(),
+                labels=list(labels),
+                image_height=h,
+                image_width=w,
+            )
+
         with torch.autocast(device_type=self.device, dtype=torch.bfloat16):
             masks, scores, _ = self.sam2_predictor.predict(
                 point_coords=None,

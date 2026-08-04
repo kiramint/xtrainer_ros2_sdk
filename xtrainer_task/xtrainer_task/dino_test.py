@@ -203,15 +203,15 @@ class DinoTestNode(Node):
         cv2.imshow("Dino Test", display)
 
         # Circle Test
-        if len(result.boxes) != 0:
-            bbox = [result.boxes[0, 0],result.boxes[0, 1],result.boxes[0, 2],result.boxes[0, 3]]
-            circle_result = get_cap_center_hough(frame,bbox)
+        # if len(result.boxes) != 0:
+        #     bbox = [result.boxes[0, 0],result.boxes[0, 1],result.boxes[0, 2],result.boxes[0, 3]]
+        #     circle_result = get_cap_center_hough(frame,bbox)
 
-            mid_point = circle_result["center"]
-            annotated_image = circle_result["vis_img"]
+        #     mid_point = circle_result["center"]
+        #     annotated_image = circle_result["vis_img"]
 
-            if mid_point is not None and annotated_image is not None:
-                cv2.imshow("Detection Result", annotated_image)
+        #     if mid_point is not None and annotated_image is not None:
+        #         cv2.imshow("Detection Result", annotated_image)
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord("q"):
