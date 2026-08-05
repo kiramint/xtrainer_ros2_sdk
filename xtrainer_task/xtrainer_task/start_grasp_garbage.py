@@ -79,7 +79,10 @@ _GRASP_NUM_VIEW = 300
 # 夹爪长度(depth)上限, 单位 m, 过滤 depth>此值的抓取。9.5cm=0.095
 _GRASP_MAX_DEPTH = 0.095
 _GRASP_TOP_K = 10
+_GRASP_ANGLE_LIMIT = 20  # 接近方向与世界Z轴的最大夹角(度), 0=不过滤
 _GRASP_MIN_POINTS = 50
+
+_GRASP_Z_LIMIT = 0.0461
 
 # ── Desk Detect: GroundingDINO + SAM2 白色桌面 → ROI → 自动掩码物体分割 ─
 _DESK_CAMERA = "camera_top"
@@ -345,7 +348,7 @@ class XTrainerTask(Node):
             valid = np.isfinite(xyz).all(axis=2) & (xyz[..., 2] > 0)
 
             # 按点云高度中位数从低到高排序, 选最低 (z 最小) 的单个检测 mask
-            mask2d = self._pick_lowest_height_mask(result, xyz, valid, H, W)
+            mask2d = self._pick_center_mask(result, H, W)
             if mask2d is None:
                 self.get_logger().warn(
                     "No usable mask after height selection."
@@ -402,7 +405,7 @@ class XTrainerTask(Node):
 
             # ── 2e. 从 score 最高开始逐个 plan, 失败换下一个 ──
             for idx, (grasp_pose, score) in enumerate(grasp_poses):
-                grasp_pose = self._tip_toward_tcp_offset(grasp_pose, -0.03)
+                grasp_pose = self._tip_toward_tcp_offset(grasp_pose, -0.01)
                 self._publish_detection_marker(
                     (grasp_pose.position.x, grasp_pose.position.y,
                      grasp_pose.position.z)
@@ -412,15 +415,20 @@ class XTrainerTask(Node):
                     f"(score={score:.3f}) for {self.pick_arm} ..."
                 )
                 plan_grasp = self.mover.plan_pose(
-                    self.pick_arm, grasp_pose, planner=Planner.pilz_ptp,
+                    self.pick_arm, grasp_pose, planner=Planner.pilz_lin,
                     tip_link=_ARM_TIP[self.pick_arm],
                 )
                 if plan_grasp is None:
-                    self.get_logger().warn(
-                        f"Candidate {idx + 1} plan failed; trying next."
+                    plan_grasp = self.mover.plan_pose(
+                        self.pick_arm, grasp_pose, planner=Planner.pilz_ptp,
+                        tip_link=_ARM_TIP[self.pick_arm],
                     )
-                    continue
-
+                    if plan_grasp is None:
+                        self.get_logger().warn(
+                            f"Candidate {idx + 1} plan failed; trying next."
+                        )
+                        continue
+                    
                 if not self.mover.execute(plan_grasp.trajectory):
                     self.get_logger().warn(
                         f"Candidate {idx + 1} execute failed; trying next."
@@ -452,15 +460,21 @@ class XTrainerTask(Node):
         self.gripper.open_both()
         self.get_logger().info("Gripper opened, ready to detect desk objects.")
 
-        result = self.step_detect_desk_objects()[0]
-        roi = result["roi"]
-        first_mid = ((roi[0] + roi[2]) // 2, (roi[1] + roi[3]) // 2)
-        self.get_logger().info(f"First object ROI: {roi}, mid: {first_mid}")
-        self.step_approach_object("camera_top",first_mid[0], first_mid[1])
+        while True:
+            results = self.step_detect_desk_objects()
+            if results is None or len(results)==0:
+                self.get_logger().warn("No desk objects detected, retrying …")
+                continue
+            result = results[0]  # 取高度最低的物体
+            roi = result["roi"]
+            first_mid = ((roi[0] + roi[2]) // 2, (roi[1] + roi[3]) // 2)
+            self.get_logger().info(f"First object ROI: {roi}, mid: {first_mid}")
+            self.step_approach_object("camera_top",first_mid[0], first_mid[1])
 
-        # 末端抓取: GroundingDINO "main object." → SAM2 切分 → 按高度中位数
-        # 从低到高排序 → 选最低的物体点云 → GraspNet 抓取
-        self.step_any_grasp()
+            # 末端抓取: GroundingDINO "main object." → SAM2 切分 → 按高度中位数
+            # 从低到高排序 → 选最低的物体点云 → GraspNet 抓取
+            self.step_any_grasp()
+            break
 
     # ------------------------------------------------------------------
     # Desk Detect: GroundingDINO + SAM2 → ROI → SAM2AutomaticMaskGenerator
@@ -886,72 +900,66 @@ class XTrainerTask(Node):
 
         return np.any(masks, axis=0)
 
-    def _pick_lowest_height_mask(
-        self, result, xyz: np.ndarray, valid: np.ndarray,
-        H_pc: int, W_pc: int,
+    def _pick_center_mask(
+        self, result, H_pc: int, W_pc: int,
     ):
-        """从检测结果中选出点云高度中位数最低 (z 最小) 的单个 mask。
+        """从检测结果中选出 mask 质心距离画面中心最近的单个 mask。
 
-        对每个 detection mask 映射到点云 (必要时 INTER_NEAREST resize),
-        计算其 z 中位数 (相机光学系深度, m), 升序排序后返回最低 (z 最小)
-        的 mask。无有效 mask 返回 None。
+        对每个 detection mask 计算其质心 (图像坐标), 按与图像中心
+        (W_img/2, H_img/2) 的欧氏距离升序排序, 返回最近的匹配 mask,
+        resize 到点云分辨率。无候选返回 None。
 
         Parameters
         ----------
         result : DetectionResult
             GroundingDINO + SAM2 检测结果, ``result.masks`` 为 (N, H, W) bool。
-        xyz : np.ndarray
-            (H_pc, W_pc, 3) 有序点云坐标。
-        valid : np.ndarray
-            (H_pc, W_pc) bool, 有效点标记 (finite & z>0)。
         H_pc, W_pc : int
             点云高/宽。
 
         Returns
         -------
         np.ndarray or None
-            (H_pc, W_pc) bool 单 mask (最低高度者); 无候选返回 None。
+            (H_pc, W_pc) bool 单 mask (最靠近中心者); 无候选返回 None。
         """
         if len(result.boxes) == 0 or len(result.masks) == 0:
             return None
 
         masks = result.masks  # (N, H_img, W_img)
-        candidates = []  # (orig_index, mask_pc, height_median)
+        H_img, W_img = masks.shape[1], masks.shape[2]
+        cx_img, cy_img = W_img / 2.0, H_img / 2.0
+
+        candidates = []
         for i in range(masks.shape[0]):
             m = masks[i]
-            if m.shape != (H_pc, W_pc):
-                m_pc = cv2.resize(
-                    m.astype(np.uint8), (W_pc, H_pc),
-                    interpolation=cv2.INTER_NEAREST,
-                ).astype(bool)
-            else:
-                m_pc = m
-            sel = m_pc & valid
-            if np.any(sel):
-                h_med = float(np.median(xyz[sel][:, 2]))
-            else:
-                h_med = None
-            candidates.append((i, m_pc, h_med))
+            ys, xs = np.where(m)
+            if len(xs) == 0:
+                candidates.append((i, float("inf")))
+                continue
+            mx = float(np.mean(xs))
+            my = float(np.mean(ys))
+            dist = np.sqrt((mx - cx_img) ** 2 + (my - cy_img) ** 2)
+            candidates.append((i, dist))
 
         if not candidates:
             return None
 
-        # 升序: height_median (z) 最小在前; None 排末尾; 同值按 orig index
-        def _key(c):
-            h = c[2]
-            if h is None:
-                return (1, 0.0, c[0])
-            return (0, h, c[0])
-
-        candidates.sort(key=_key)
+        candidates.sort(key=lambda c: c[1])
 
         chosen = candidates[0]
-        h_str = f"{chosen[2]:.4f}" if chosen[2] is not None else "NA"
+        m_chosen = masks[chosen[0]]
+        if m_chosen.shape != (H_pc, W_pc):
+            m_pc = cv2.resize(
+                m_chosen.astype(np.uint8), (W_pc, H_pc),
+                interpolation=cv2.INTER_NEAREST,
+            ).astype(bool)
+        else:
+            m_pc = m_chosen
+
         self.get_logger().info(
-            f"Pick lowest-height mask: idx={chosen[0]} "
-            f"height_z={h_str} (among {len(candidates)} dets)"
+            f"Pick center mask: idx={chosen[0]} "
+            f"center_dist={chosen[1]:.1f}px (among {len(candidates)} dets)"
         )
-        return chosen[1]
+        return m_pc
 
     @staticmethod
     def _dilate_mask_3d(mask2d, xyz, radius_m: float):
@@ -1097,6 +1105,41 @@ class XTrainerTask(Node):
 
         gg.nms()
         gg.sort_by_score()
+
+        if _GRASP_ANGLE_LIMIT > 0:
+            try:
+                cam_to_base = self._tf_buffer.lookup_transform(
+                    "base_link", frame_id, stamp,
+                    timeout=rclpy.duration.Duration(seconds=1.0),
+                )
+                rot = cam_to_base.transform.rotation
+                R_c2b = R.from_quat(
+                    [rot.x, rot.y, rot.z, rot.w]
+                ).as_matrix()
+                world_z_in_cam = R_c2b.T @ np.array(
+                    [0.0, 0.0, 1.0]
+                )
+            except Exception:
+                self.get_logger().warn(
+                    f"Angle filter skipped: "
+                    f"cannot get {frame_id}→base_link TF",
+                    throttle_duration_sec=5.0,
+                )
+            else:
+                kept = []
+                for i, g in enumerate(gg):
+                    tool_R = g.rotation_matrix @ _GRASP_TO_TOOL
+                    approach = tool_R[:, 2]
+                    cos_ang = np.dot(approach, world_z_in_cam)
+                    ang_deg = np.degrees(
+                        np.arccos(
+                            np.clip(np.abs(cos_ang), 0.0, 1.0)
+                        )
+                    )
+                    if ang_deg <= _GRASP_ANGLE_LIMIT:
+                        kept.append(i)
+                gg = gg[kept]
+
         gg = gg[: _GRASP_TOP_K]
 
         gripper_geos = gg.to_open3d_geometry_list()
