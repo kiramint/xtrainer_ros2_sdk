@@ -299,7 +299,7 @@ class XTrainerTask(Node):
             # ── 2a. GroundingDINO + SAM2 识别物体 ──────────────
             image = self.get_latest_color(_ARM_CAM[self.pick_arm])
             if image is None:
-                self.get_logger().error("No top camera image available.")
+                self.get_logger().error(f"No {_ARM_CAM[self.pick_arm]} camera image available.")
                 time.sleep(0.05)
                 continue
 
@@ -328,7 +328,7 @@ class XTrainerTask(Node):
 
             if cloud_msg is None:
                 self.get_logger().warn(
-                    "No top camera point cloud available."
+                    f"No {_ARM_CAM[self.pick_arm]} point cloud available."
                 )
                 time.sleep(0.05)
                 continue
@@ -475,7 +475,8 @@ class XTrainerTask(Node):
             3. 由 mask 外接矩形 (±``_DESK_ROI_SHRINK_PX``) 得到 ROI
             4. 在 ROI 裁剪区域内运行 ``SAM2AutomaticMaskGenerator``
                → 桌上物体 mask 列表 (按面积降序, #0 通常是桌面本身)
-            5. 排除面积最大的 mask (``_DESK_DROP_LARGEST_MASK``)
+            5. 排除面积最大的 mask (``_DESK_DROP_LARGEST_MASK``), 并排除
+               未完整落在步骤 2 桌面 SAM 外轮廓以内的 mask
             6. 把每个物体的 mask 映射到点云, 取 z 中位数作为高度
             7. 按 ``(height_median, index)`` 升序排序 (z 越小=越靠近相机=
                物理越高, None 排末尾), 在 OpenCV 窗口显示
@@ -516,6 +517,17 @@ class XTrainerTask(Node):
             objects = anns[1:]
         else:
             objects = anns
+
+        # ROI 是桌面 mask 的外接矩形, 其四角仍可能位于真实桌面轮廓外。
+        # 仅保留完整落在步骤 2 桌面 SAM 最大外轮廓内部的候选物体。
+        objects, excluded_count = self._filter_masks_inside_table(
+            objects, table_mask
+        )
+        if excluded_count:
+            self.get_logger().info(
+                f"Excluded {excluded_count} object mask(s) outside "
+                "the table SAM outer contour."
+            )
 
         # ── 5. 取点云 → 计算每个物体 z 中位数 (高度) ─────────
         xyz = None
@@ -630,6 +642,38 @@ class XTrainerTask(Node):
         x1 = max(x0 + 1, min(W - 1, x1))
         y1 = max(y0 + 1, min(H - 1, y1))
         return mask2d, (int(x0), int(y0), int(x1), int(y1))
+
+    @staticmethod
+    def _filter_masks_inside_table(objects, table_mask):
+        """仅保留完整位于桌面 SAM 最大外轮廓内部的候选 mask。"""
+        if table_mask is None or not np.any(table_mask):
+            return [], len(objects)
+
+        contours, _ = cv2.findContours(
+            table_mask.astype(np.uint8),
+            cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_SIMPLE,
+        )
+        if not contours:
+            return [], len(objects)
+
+        outer_contour = max(contours, key=cv2.contourArea)
+        table_inside = np.zeros(table_mask.shape, dtype=np.uint8)
+        cv2.drawContours(
+            table_inside, [outer_contour], -1, 1, thickness=cv2.FILLED
+        )
+        table_inside = table_inside.astype(bool)
+
+        kept = []
+        for obj in objects:
+            mask = np.asarray(obj["segmentation_full"], dtype=bool)
+            if mask.shape != table_inside.shape or not np.any(mask):
+                continue
+            if np.any(mask & ~table_inside):
+                continue
+            kept.append(obj)
+
+        return kept, len(objects) - len(kept)
 
     def _run_auto_masks(self, frame: np.ndarray, roi: tuple):
         """在 ROI 裁剪区域内运行 SAM2AutomaticMaskGenerator。
