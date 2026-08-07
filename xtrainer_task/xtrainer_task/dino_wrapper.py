@@ -148,6 +148,7 @@ class DinoWrapper:
             self.sam2_predictor.set_image(image)
 
         # ── 2. Grounding DINO 检测 ──────────────────────────
+        print(f"Dino processing prompt: {prompt}")
         image_tensor = self._bgr_to_gdino_tensor(image)
         boxes_ccwh, confidences, labels = predict(
             model=self.grounding_model,
@@ -173,6 +174,7 @@ class DinoWrapper:
         input_boxes = box_convert(boxes=boxes_ccwh, in_fmt="cxcywh", out_fmt="xyxy").numpy()
 
         # ── 3. SAM2 分割 (use_sam=False 时返回空 mask) ──────
+        print(f"Sam2 processing {len(input_boxes)} boxes")
         if self.sam2_predictor is None:
             return DetectionResult(
                 boxes=input_boxes,
@@ -192,6 +194,7 @@ class DinoWrapper:
             )
 
         # ── 4. 后处理 ───────────────────────────────────────
+        print(f"DinoWrapper: Post processing")
         scores_arr = np.asarray(scores)
 
         if self.multimask_output:

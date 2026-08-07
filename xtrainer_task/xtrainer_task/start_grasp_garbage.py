@@ -79,7 +79,7 @@ _GRASP_NUM_VIEW = 300
 # 夹爪长度(depth)上限, 单位 m, 过滤 depth>此值的抓取。9.5cm=0.095
 _GRASP_MAX_DEPTH = 0.095
 _GRASP_TOP_K = 10
-_GRASP_ANGLE_LIMIT = 20  # 接近方向与世界Z轴的最大夹角(度), 0=不过滤
+_GRASP_ANGLE_LIMIT = 90  # 接近方向与世界Z轴的最大夹角(度), 0=不过滤
 _GRASP_MIN_POINTS = 50
 
 _GRASP_Z_LIMIT = 0.0461
@@ -119,7 +119,7 @@ class XTrainerTask(Node):
         super().__init__("xtrainer_task")
 
         # SAM 边缘膨胀: 在 3D 空间把分割点云往外多保留 radius_m 内的点
-        self.declare_parameter("mask_dilation_m", 0.04)
+        self.declare_parameter("mask_dilation_m", 0.8)
         self._mask_dilation_m = float(
             self.get_parameter("mask_dilation_m").value
         )
@@ -191,8 +191,8 @@ class XTrainerTask(Node):
         )
         self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self)
 
-        self._camera_cb_group = ReentrantCallbackGroup()   # 相机回调组，允许并发/独立于 launch
-        self._launch_cb_group = MutuallyExclusiveCallbackGroup()  # launch 定时器单独一组
+        self._camera_cb_group = ReentrantCallbackGroup()
+        self._cloud_cb_group = MutuallyExclusiveCallbackGroup()
 
 
         # 为三个相机分别订阅彩色、对齐深度 & 内参话题
@@ -229,7 +229,7 @@ class XTrainerTask(Node):
                 PointCloud2, cloud_topic,
                 lambda msg, cam=name: self._cloud_callback(cam, msg),
                 10,
-                callback_group=self._camera_cb_group,
+                callback_group=self._cloud_cb_group,
             )
             self.get_logger().info(f"Subscribed pointcloud: {cloud_topic}")
 
@@ -239,20 +239,9 @@ class XTrainerTask(Node):
 
         self.get_logger().info('#################### All module initialized ######################')
 
-        self._launch_timer = self.create_timer(
-            1.0,
-            self._on_launch_timer,
-            callback_group=self._launch_cb_group
-        )
-
     # ------------------------------------------------------------------
     # Controll Task ####################################################
     # ------------------------------------------------------------------
-
-    def _on_launch_timer(self):
-        """One-shot timer callback — cancels timer after first invocation."""
-        self._launch_timer.cancel()
-        self.launch()
 
     def step_approach_object(self,camera_name, mid_x, mid_y):
         mid_coordinate = self.pixel_to_base_link(camera_name, mid_x, mid_y)             
@@ -266,7 +255,7 @@ class XTrainerTask(Node):
         pose_prepare = Pose()
         pose_prepare.position.x = mid_coordinate[0]
         pose_prepare.position.y = mid_coordinate[1]
-        pose_prepare.position.z = mid_coordinate[2] + 0.05
+        pose_prepare.position.z = mid_coordinate[2] + 0.1
         pose_prepare.orientation.x = 0.9999995231628418
         pose_prepare.orientation.y = 7.932441803859547e-06
         pose_prepare.orientation.z = 0.001016218215227127
@@ -322,6 +311,7 @@ class XTrainerTask(Node):
                 annotated_image = image
             cv2.imshow("Detection Result", annotated_image)
             cv2.waitKey(1)
+            time.sleep(0.05)
 
             # ── 2b. 驱动发布的有序彩色点云 → 物体点子集 ────────
             with self._snapshots_lock:
@@ -356,9 +346,11 @@ class XTrainerTask(Node):
                 time.sleep(0.05)
                 continue
 
+            self.get_logger().info("start dilating mask")
             mask2d = self._dilate_mask_3d(
                 mask2d, xyz, self._mask_dilation_m
             )
+            self.get_logger().info("complete dilating mask")
 
             sel = mask2d & valid
             pts = xyz[sel]
@@ -374,14 +366,18 @@ class XTrainerTask(Node):
             cloud_o3d.colors = o3d.utility.Vector3dVector(cols)
 
             # ── 2c. GraspNet 抓取检测 ──────────────────────────
+            self.get_logger().info("start grasp detection")
             gg = self._predict_grasps(cloud_o3d)
             if gg is None or len(gg) == 0:
                 self.get_logger().warn("GraspNet returned no grasps.")
                 continue
 
+            self._show_grasps_o3d(cloud_o3d, gg.to_open3d_geometry_list())
+
             # ── 2d. 过滤/排序 → 取前 10 → TF 变换到 base_link ──
             # 直接以相机 color optical frame 作为 TF 源, 用点云时间戳对齐
             # (eye-in-hand 相机随手臂移动, 必须用点云采集时刻的 TF)。
+            self.get_logger().info("start filter grasp pose")
             camera_name = _ARM_CAM[self.pick_arm]
             optical_frame = _CAMERA_OPTICAL_FRAMES[camera_name]
             grasp_poses, gripper_geos, grasp_geos_aligned = (
@@ -405,7 +401,12 @@ class XTrainerTask(Node):
 
             # ── 2e. 从 score 最高开始逐个 plan, 失败换下一个 ──
             for idx, (grasp_pose, score) in enumerate(grasp_poses):
-                grasp_pose = self._tip_toward_tcp_offset(grasp_pose, -0.01)
+                current_joints = self.mover.get_current_joint_positions(
+                    self.pick_arm
+                )
+                grasp_pose = self._tip_toward_tcp_offset(grasp_pose, -0.03)
+                if grasp_pose.position.z < _GRASP_Z_LIMIT:
+                    grasp_pose.position.z = _GRASP_Z_LIMIT
                 self._publish_detection_marker(
                     (grasp_pose.position.x, grasp_pose.position.y,
                      grasp_pose.position.z)
@@ -428,7 +429,11 @@ class XTrainerTask(Node):
                             f"Candidate {idx + 1} plan failed; trying next."
                         )
                         continue
-                    
+
+                plan_grasp = self._flip_j6_if_needed(
+                    plan_grasp, current_joints, self.pick_arm, idx
+                )
+
                 if not self.mover.execute(plan_grasp.trajectory):
                     self.get_logger().warn(
                         f"Candidate {idx + 1} execute failed; trying next."
@@ -454,27 +459,95 @@ class XTrainerTask(Node):
         # ── 2e. Gripper close ──
         self.gripper.close(_GRIPPER[self.pick_arm])
 
+    def step_go_up(self):
+        pose = self.mover.get_current_pose(self.pick_arm, tip_link=_ARM_TIP[self.pick_arm])
+        z_limit = pose.position.z
+        pose.position.z = z_limit + 0.2
+        while pose.position.z > z_limit:
+            plan_result = self.mover.plan_pose(self.pick_arm, pose, planner=Planner.pilz_lin, tip_link=_ARM_TIP[self.pick_arm])
+            if plan_result is None:
+                self.get_logger().error(f"################### Moveit {self.pick_arm} Planning Failed #################")
+                pose.position.z -= 0.01
+                time.sleep(0.1)
+                continue
+            else:
+                self.mover.execute(plan_result.trajectory)
+                self.get_logger().error(f"################### Moveit {self.pick_arm} Go Up #################")
+                return True
+        return False
+
+    def step_place_object(self):
+        pose = Pose()
+        if self.pick_arm == "Arm1":
+            pose.position.x = 0.0677
+            pose.position.y = -0.2794
+            pose.position.z = 0.3030
+            pose.orientation.x = 0.9992
+            pose.orientation.y = -0.0370
+            pose.orientation.z = 0.0067
+            pose.orientation.w = 0.0109
+        else:
+            pose.position.x = 1.0077
+            pose.position.y = -0.2945
+            pose.position.z = 0.3061
+            pose.orientation.x = 0.9994
+            pose.orientation.y = -0.0184
+            pose.orientation.z = 0.0198
+            pose.orientation.w = -0.0211
+
+        plan_result = self.mover.plan_pose(self.pick_arm, pose, planner=Planner.pilz_ptp, tip_link=_ARM_TIP[self.pick_arm])
+        if plan_result is None:
+            self.get_logger().error(f"################### Moveit {self.pick_arm} Planning Failed #################")
+            return False
+        self.mover.execute(plan_result.trajectory)
+        self.gripper.open(_GRIPPER[self.pick_arm])
+        return True
+
 
     def launch(self):
-
         self.gripper.open_both()
-        self.get_logger().info("Gripper opened, ready to detect desk objects.")
+
+        try_times = 3
 
         while True:
+            if try_times <= 0:
+                break
+
+            # Step 1: Detect desk objects
+            self.get_logger().info("Step 1: Detect desk objects")
             results = self.step_detect_desk_objects()
             if results is None or len(results)==0:
                 self.get_logger().warn("No desk objects detected, retrying …")
+                time.sleep(0.5)
+                try_times -= 1
                 continue
+            try_times = 3
+
             result = results[0]  # 取高度最低的物体
             roi = result["roi"]
             first_mid = ((roi[0] + roi[2]) // 2, (roi[1] + roi[3]) // 2)
             self.get_logger().info(f"First object ROI: {roi}, mid: {first_mid}")
+
+            # Step 2: Approach object
+            self.get_logger().info("Step 2: Approach object")
             self.step_approach_object("camera_top",first_mid[0], first_mid[1])
 
-            # 末端抓取: GroundingDINO "main object." → SAM2 切分 → 按高度中位数
-            # 从低到高排序 → 选最低的物体点云 → GraspNet 抓取
+            # Step 3: Detect object and Grasp
+            self.get_logger().info("Step 3: Detect object and Grasp")
             self.step_any_grasp()
-            break
+            time.sleep(0.5)
+
+            # Step 4: Go up
+            self.get_logger().info("Go up")
+            self.step_go_up()
+
+            # Step 5: Place object
+            self.get_logger().info("Step 5: Place object")
+            self.step_place_object()
+
+        while rclpy.ok():
+            rclpy.spin_once(self, timeout_sec=0.1)
+            time.sleep(0.01)
 
     # ------------------------------------------------------------------
     # Desk Detect: GroundingDINO + SAM2 → ROI → SAM2AutomaticMaskGenerator
@@ -509,12 +582,8 @@ class XTrainerTask(Node):
         # ── 1. 取最新彩色帧 ──────────────────────────────────
         image = self.get_latest_color(_DESK_CAMERA)
         if image is None:
-            self.get_logger().warn(
-                f"[{_DESK_CAMERA}] no color frame yet",
-                throttle_duration_sec=2.0,
-            )
+            self.get_logger().warn(f"[{_DESK_CAMERA}] no color frame yet",throttle_duration_sec=2.0)
             return None
-
         H, W = image.shape[:2]
 
         # ── 2. GroundingDINO + SAM2 检测桌面 ─────────────────
@@ -531,17 +600,12 @@ class XTrainerTask(Node):
             objects = anns[1:]
         else:
             objects = anns
-
-        # ROI 是桌面 mask 的外接矩形, 其四角仍可能位于真实桌面轮廓外。
-        # 仅保留完整落在步骤 2 桌面 SAM 最大外轮廓内部的候选物体。
+        # ROI 是桌面 mask 的外接矩形, 其四角仍可能位于真实桌面轮廓外。仅保留完整落在步骤 2 桌面 SAM 最大外轮廓内部的候选物体。
         objects, excluded_count = self._filter_masks_inside_table(
             objects, table_mask
         )
         if excluded_count:
-            self.get_logger().info(
-                f"Excluded {excluded_count} object mask(s) outside "
-                "the table SAM outer contour."
-            )
+            self.get_logger().info(f"Excluded {excluded_count} object mask(s) outside the table SAM outer contour.")
 
         # ── 5. 取点云 → 计算每个物体 z 中位数 (高度) ─────────
         xyz = None
@@ -551,15 +615,10 @@ class XTrainerTask(Node):
             cloud_msg = self._snapshots.get(_DESK_CAMERA, {}).get("points")
         if cloud_msg is not None:
             try:
-                xyz, _rgb, H_pc, W_pc = self._ros_pointcloud_to_organized(
-                    cloud_msg
-                )
+                xyz, _rgb, H_pc, W_pc = self._ros_pointcloud_to_organized(cloud_msg)
                 valid = np.isfinite(xyz).all(axis=2) & (xyz[..., 2] > 0)
             except Exception as exc:
-                self.get_logger().warn(
-                    f"[{_DESK_CAMERA}] point cloud parse failed: {exc}",
-                    throttle_duration_sec=2.0,
-                )
+                self.get_logger().warn(f"[{_DESK_CAMERA}] point cloud parse failed: {exc}",throttle_duration_sec=2.0,)
                 xyz = None
 
         # ── 6. 构建结果列表 (index, roi, mask, height_median) ─
@@ -570,15 +629,10 @@ class XTrainerTask(Node):
             if xyz is not None and valid is not None:
                 mask_pc = mask
                 if mask_pc.shape != (H_pc, W_pc):
-                    mask_pc = cv2.resize(
-                        mask.astype(np.uint8), (W_pc, H_pc),
-                        interpolation=cv2.INTER_NEAREST,
-                    ).astype(bool)
+                    mask_pc = cv2.resize(mask.astype(np.uint8), (W_pc, H_pc),interpolation=cv2.INTER_NEAREST,).astype(bool)
                 sel = mask_pc & valid
                 if np.any(sel):
-                    height_median = float(
-                        np.median(xyz[sel][:, 2])
-                    )
+                    height_median = float(np.median(xyz[sel][:, 2]))
             results.append({
                 "index": i,
                 "roi": tuple(int(v) for v in a["bbox_xyxy_full"]),
@@ -612,6 +666,7 @@ class XTrainerTask(Node):
                 )
 
         # ── 9. OpenCV 可视化 ────────────────────────────────
+        self.get_logger().info("Step_1a")
         display = self._draw_desk_objects(image, table_mask, roi, results)
         cv2.putText(
             display,
@@ -620,7 +675,9 @@ class XTrainerTask(Node):
             (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2,
         )
         cv2.imshow(_DESK_WINDOW_NAME, display)
+        self.get_logger().info("Step_1b")
         key = cv2.waitKey(1) & 0xFF
+        self.get_logger().info("Step_1c")
         if key == ord('q'):
             self.get_logger().info(
                 "Pressed 'q' in OpenCV window, exiting desk detect loop …"
@@ -808,7 +865,84 @@ class XTrainerTask(Node):
         out.position.z = pose.position.z - z_axis[2] * offset_m
         out.orientation = pose.orientation
         return out
-    
+
+    # J6 角度限位 (URDF ±6.28 rad ≈ ±360°), 有界回转关节, 不可回环
+    _J6_LIMIT_RAD = 6.28
+
+    def _flip_j6_if_needed(self, plan_result, current_joints, arm, candidate_idx):
+        """选择使 J6 真实行程最小的等价目标, 必要时关节空间重规划。
+
+        J6 是有界回转关节 [-360°, 360°], 不可回环: 两个"朝向很近"的关节
+        值在关节空间里可能差 300°~380°。同一末端朝向有多个代表值 (相差
+        ±360° 缠绕), 叠加平行夹爪的 180° 抓取对称性, 等价 J6 目标每 180°
+        一个。原始 IK 解不一定是离 current 最近者, 直接执行可能产生大旋转。
+
+        做法: 枚举所有合法等价目标 (缠绕 ±360° ∪ 抓取对称 ±180°, 限内),
+        按「原始关节差」(规划器实际执行量, 非归一化) 取离 current 最近者;
+        若与原 IK 解不同则重规划。因候选每 180° 一个, 最近者真实行程必
+        ≤90° (关节限位边界除外, 此时取可达最近者)。
+        """
+        try:
+            traj_msg = plan_result.trajectory.get_robot_trajectory_msg()
+            jt = traj_msg.joint_trajectory
+            if not jt.points:
+                return plan_result
+            final_by_name = dict(zip(jt.joint_names, jt.points[-1].positions))
+        except Exception:
+            return plan_result
+
+        arm_prefix = 'J1' if arm == 'Arm1' else 'J2'
+        active_names = [f'{arm_prefix}_{i}' for i in range(1, 7)]
+        if not all(n in final_by_name for n in active_names):
+            return plan_result
+
+        final_joints = [final_by_name[n] for n in active_names]
+        ik_j6 = final_joints[5]
+        cur_j6 = current_joints[5]
+        raw_motion = ik_j6 - cur_j6  # 原方案规划器实际执行的关节行程
+
+        # 枚举等价 J6 目标: {ik, ik+π} 各加 ±360° 缠绕, 仅保留限内
+        candidates = set()
+        for base in (ik_j6, ik_j6 + math.pi):
+            for k in (-1, 0, 1):
+                c = base + k * 2 * math.pi
+                if -self._J6_LIMIT_RAD <= c <= self._J6_LIMIT_RAD:
+                    candidates.add(round(c, 6))
+        if not candidates:
+            return plan_result
+
+        # 按离 current 的原始行程升序; 最近者即最优等价目标
+        ordered = sorted(candidates, key=lambda c: abs(c - cur_j6))
+        best = ordered[0]
+        if abs(best - ik_j6) < 1e-6:
+            # 原 IK 解已是最优 → 真实行程本就 ≤90°, 无需重规划
+            return plan_result
+
+        best_motion = best - cur_j6
+        self.get_logger().info(
+            f"Candidate {candidate_idx + 1}: J6 原始行程 "
+            f"{math.degrees(raw_motion):.1f}° 过大, 选等价目标 → "
+            f"真实行程 {math.degrees(best_motion):.1f}°, 关节空间重规划"
+        )
+
+        # 依次尝试候选 (最近优先), 任一成功即用; 全失败则回退原方案
+        for c in ordered:
+            if abs(c - ik_j6) < 1e-6:
+                continue
+            target = list(final_joints)
+            target[5] = c
+            replan = self.mover.plan_joints(
+                arm, target, planner=Planner.pilz_ptp,
+            )
+            if replan is not None:
+                return replan
+
+        self.get_logger().warn(
+            f"Candidate {candidate_idx + 1}: J6 等价目标重规划全部失败, "
+            "使用原方案"
+        )
+        return plan_result
+
     @staticmethod
     def _ros_pointcloud_to_organized(msg: PointCloud2):
         """解析驱动发布的有序彩色点云 → (xyz(H,W,3), rgb(H,W,3), H, W)。
@@ -1101,6 +1235,7 @@ class XTrainerTask(Node):
             keep = np.where(gg.depths <= _GRASP_MAX_DEPTH)[0]
             gg = gg[keep]
         if len(gg) == 0:
+            self.get_logger().error("No grasp pose due to max depth > _GRASP_MAX_DEPTH")
             return [], [], []
 
         gg.nms()
@@ -1138,6 +1273,9 @@ class XTrainerTask(Node):
                     )
                     if ang_deg <= _GRASP_ANGLE_LIMIT:
                         kept.append(i)
+                if len(kept) == 0:
+                    self.get_logger().error("No grasp pose due to ang_deg < _GRASP_ANGLE_LIMIT")
+                    return [], [], []
                 gg = gg[kept]
 
         gg = gg[: _GRASP_TOP_K]
@@ -1666,8 +1804,11 @@ def main():
     executor = rclpy.executors.MultiThreadedExecutor()
     executor.add_node(node)
 
+    spin_thread = threading.Thread(target=executor.spin, daemon=True)
+    spin_thread.start()
+
     try:
-        executor.spin()
+        node.launch()
     except KeyboardInterrupt:
         pass
     finally:
