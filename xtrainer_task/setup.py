@@ -35,7 +35,7 @@ setup(
             'start_open_bottle = xtrainer_task.start_open_bottle:main',
             'start_insert_straw = xtrainer_task.start_insert_straw:main',
             'start_grasp_garbage = xtrainer_task.start_grasp_garbage:main',
-            'start_grasp_garbage = xtrainer_task.start_grasp_plane:main',
+            'start_grasp_plane = xtrainer_task.start_grasp_plane:main',
             'dino_test = xtrainer_task.dino_test:main',
             'dino_pose_test = xtrainer_task.dino_pose_test:main',
             'dino_contour_test = xtrainer_task.dino_contour_test:main',
