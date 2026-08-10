@@ -40,7 +40,7 @@ setup(
             'dino_pose_test = xtrainer_task.dino_pose_test:main',
             'dino_contour_test = xtrainer_task.dino_contour_test:main',
             'detect_desk_object = xtrainer_task.detect_desk_object:main',
-            'detect_desk_object2 = xtrainer_task.detect_desk_object2:main',
+            'sam_detection_test = xtrainer_task.sam_detection_test:main',
             'read_pose = xtrainer_task.read_pose:main',
             'goto_pose = xtrainer_task.goto_pose:main',
             'graspnet_test = xtrainer_task.graspnet_test:main',
