@@ -104,21 +104,37 @@ pip install -r requirements.txt
 >     * 如果你的Cuda版本为11.8或以下，可以直接安装上面两个仓库，如果你的Cuda版本大于11.8，请使用[Grounded-SAM-2](https://github.com/IDEA-Research/Grounded-SAM-2)仓库中的GroundingDINO与SAM2。本项目测试时使用Grounded-SAM-2。
 >
 >     * 若要使用[Grounded-SAM-2](https://github.com/IDEA-Research/Grounded-SAM-2)中的GroundingDINO，请修改GroundingDINO代码中的import，将`from grounding_dino.groundingdino.*`改为`from groundingdino.*`，可使用以下命令快速替换
->
->
->     ```shell
->     cd Grounded-SAM-2/grounding_dino
->     find . -name "*.py" -type f -exec sed -i 's/grounding_dino\.groundingdino\./groundingdino\./g' {} +
->     ```
->    
+>     
+>       ```shell
+>       cd Grounded-SAM-2/grounding_dino
+>       find . -name "*.py" -type f -exec sed -i 's/grounding_dino\.groundingdino\./groundingdino\./g' {} +
+>       ```
+>     
 >     * 最后构建
->    
->     ```shell
->     cd Grounded-SAM-2/grounding_dino
->     pip install -e . --no-build-isolation
->     ```
->    
->     * 仓库中的SAM2安装官方方法安装
+>     
+>       ```shell
+>       cd Grounded-SAM-2/grounding_dino
+>       pip install -e . --no-build-isolation
+>       ```
+>     
+>     * 仓库中的SAM2按照官方方法安装
+>
+>
+> * 修复 GroundingDINO `_C.so` 动态库链接
+>
+>   `pip install -e .` 编译出的 `groundingdino/_C*.so` 的 RPATH 会被硬编码为 `$CONDA_PREFIX/lib`，但 pip 安装的 PyTorch 库实际位于 `site-packages/torch/lib`，运行时找不到 > `libc10.so` 等依赖。该加载失败被 `ms_deform_attn.py` 的 `try/except` 静默吞掉，最终在模型推理时报 `NameError: name '_C' is not defined`。在 conda env 激活状态下执行以下命> 令建立软链即可修复：
+>
+>   ```shell
+>   CONDA_LIB="$CONDA_PREFIX/lib"
+>   TORCH_LIB="$(python -c 'import torch,os;print(os.path.join(os.path.dirname(torch.__file__),"lib"))')"
+>   NV_LIB="$(python -c 'import importlib.util,os;s=importlib.util.find_spec("nvidia");print(os.path.dirname(s.origin) if s else "")')"
+>   for lib in libc10.so libc10_cuda.so libtorch_cpu.so libtorch_python.so libtorch.so libtorch_cuda.so libshm.so libtorch_nvshmem.so; do
+>       [ -f "$TORCH_LIB/$lib" ] && ln -sf "$TORCH_LIB/$lib" "$CONDA_LIB/$lib"
+>   done
+>   for sub in cudnn/lib/libcudnn nccl/lib/libnccl cusparselt/lib/libcusparseLt nvshmem/lib/libnvshmem_host; do
+>       for f in "$NV_LIB/$sub"*; do [ -f "$f" ] && ln -sf "$f" "$CONDA_LIB/$(basename $f)"; done
+>   done
+>   ```
 >
 > * GraspNet
 >
@@ -128,6 +144,11 @@ pip install -r requirements.txt
 > [!Note]
 >
 > 本项目使用官方预训练模型，请安装官方仓库中的教程运行`download_ckpts.sh`，GraspNet的Checkpoint由于非常小，已经包含到Git仓库中
+
+> [!Tip]
+>
+> * PyTorch 升级或重新编译 `_C.so` 后，若库版本号变化（如 `libcudnn.so.9`→`.10`）需重新执行上述命令
+> * `ms_deform_attn.py` 在重新编译后可能被 git 覆盖回 `from grounding_dino.groundingdino import _C`，需重新执行前面的 sed 命令
 
 8. 编译项目
 
