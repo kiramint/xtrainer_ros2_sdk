@@ -725,6 +725,114 @@ class XTrainerTask(Node):
             self.step_place_object()
             self.pick_arm = "Arm1"
 
+    def step_handover_sphere(self):
+        pose_left = Pose()
+        pose_left.position.x = 0.489703506231308
+        pose_left.position.y = -0.22251279652118683
+        pose_left.position.z = 0.6705431938171387
+        pose_left.orientation.x = 0.5011873245239258
+        pose_left.orientation.y = -0.4988105893135071
+        pose_left.orientation.z = 0.5012343525886536
+        pose_left.orientation.w = -0.4987618327140808
+
+        pose_right = Pose()
+        pose_right.position.x = 0.5677281022071838
+        pose_right.position.y = -0.22164933383464813
+        pose_right.position.z = 0.6699091792106628
+        pose_right.orientation.x = -0.7071065306663513
+        pose_right.orientation.y = -9.514826615486527e-07
+        pose_right.orientation.z = 0.7071070075035095
+        pose_right.orientation.w = -4.012663794128457e-06
+
+        if self.pick_arm == "Arm1":
+                    
+            # stage 1
+            self.gripper.open("right")
+            self.get_logger().info("Stage 1")
+            plan_result = self.mover.plan_pose("Arm1",pose_left,planner=Planner.ompl,tip_link="L1_gripper_tcp")
+            if plan_result is None:
+                self.get_logger().error(f"################### Moveit {self.pick_arm} Planning Failed #################")
+                return False
+            self.mover.execute(plan_result.trajectory)
+            
+            # stage 2
+            self.get_logger().info("Stage 2")
+            pre_pose_right = copy.deepcopy(pose_right)
+            pre_pose_right.position.x = pre_pose_right.position.x + 0.1
+            plan_result = self.mover.plan_pose("Arm2",pre_pose_right,planner=Planner.ompl,tip_link="L2_gripper_tcp")
+            if plan_result is None:
+                self.get_logger().error(f"################### Moveit {self.pick_arm} Planning Failed #################")
+                return False
+            self.mover.execute(plan_result.trajectory)
+
+            # stage 3 
+            self.get_logger().info("Stage 3")
+            plan_result = self.mover.plan_pose("Arm2",pose_right,planner=Planner.pilz_lin,tip_link="L2_gripper_tcp")
+            if plan_result is None:
+                self.get_logger().error(f"################### Moveit {self.pick_arm} Planning Failed #################")
+                return False
+            self.mover.execute(plan_result.trajectory)
+            # self.gripper.close("right")
+            time.sleep(1)
+            self.gripper.open("left")
+
+            # stage 4
+            self.get_logger().info("Stage 4")
+            post_pose_left = copy.deepcopy(pose_left)
+            post_pose_left.position.x = post_pose_left.position.x - 0.1
+            plan_result = self.mover.plan_pose("Arm1",post_pose_left,planner=Planner.pilz_lin,tip_link="L1_gripper_tcp")
+            if plan_result is None:
+                self.get_logger().error(f"################### Moveit {self.pick_arm} Planning Failed #################")
+                return False
+            self.mover.execute(plan_result.trajectory)
+
+            self.step_place_object()
+
+            self.pick_arm = "Arm2"
+        else:
+            # stage 1
+            self.gripper.open("left")
+            self.get_logger().info("Stage 1")
+            plan_result = self.mover.plan_pose("Arm2",pose_right,planner=Planner.ompl,tip_link="L2_gripper_tcp")
+            if plan_result is None:
+                self.get_logger().error(f"################### Moveit {self.pick_arm} Planning Failed #################")
+                return False
+            self.mover.execute(plan_result.trajectory)
+
+            # stage 2
+            self.get_logger().info("Stage 2")
+            pre_pose_left = copy.deepcopy(pose_left)
+            pre_pose_left.position.x = pre_pose_left.position.x - 0.1
+            plan_result = self.mover.plan_pose("Arm1",pre_pose_left,planner=Planner.ompl,tip_link="L1_gripper_tcp")
+            if plan_result is None:
+                self.get_logger().error(f"################### Moveit {self.pick_arm} Planning Failed #################")
+                return False
+            self.mover.execute(plan_result.trajectory)
+
+            # stage 3 
+            self.get_logger().info("Stage 3")
+            plan_result = self.mover.plan_pose("Arm1",pose_left,planner=Planner.pilz_lin,tip_link="L1_gripper_tcp")
+            if plan_result is None:
+                self.get_logger().error(f"################### Moveit {self.pick_arm} Planning Failed #################")
+                return False
+            self.mover.execute(plan_result.trajectory)
+
+            # self.gripper.close("left")  
+            time.sleep(1)
+            self.gripper.open("right")
+            
+            # stage 4
+            self.get_logger().info("Stage 4")
+            post_pose_right = copy.deepcopy(pose_right)
+            post_pose_right.position.x = post_pose_right.position.x + 0.1
+            plan_result = self.mover.plan_pose("Arm2",post_pose_right,planner=Planner.pilz_lin,tip_link="L2_gripper_tcp")
+            if plan_result is None:
+                self.get_logger().error(f"################### Moveit {self.pick_arm} Planning Failed #################")
+                return False
+            self.mover.execute(plan_result.trajectory)
+            
+            self.step_place_object()
+            self.pick_arm = "Arm1"
 
     def launch(self):
         self.gripper.open_both()
@@ -736,10 +844,10 @@ class XTrainerTask(Node):
                 break
 
             # self.pick_arm = "Arm1"
-            # self.step_handover_rectangle()
+            # self.step_handover_sphere()
 
             # self.pick_arm = "Arm2"
-            # self.step_handover_rectangle()
+            # self.step_handover_sphere()
             # return 
 
             # Step 1: Detect desk objects
