@@ -149,6 +149,7 @@ class DinoTestNode(Node):
         )
         self.get_logger().info("Models loaded successfully.")
 
+        cv2.destroyAllWindows()
         # ── 订阅图像话题 ──────────────────────────────────────
         self._sub = self.create_subscription(
             Image, self._image_topic, self._image_callback, 10

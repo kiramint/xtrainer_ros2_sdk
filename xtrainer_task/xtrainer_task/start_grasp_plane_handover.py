@@ -231,6 +231,10 @@ class XTrainerTask(Node):
         # ARM
         self.pick_arm = "Arm1"
 
+        # Step 3 拟合矩形的 3D 边长 (m), 供 Step 4.1 handover 分支判断
+        self._obj_long_len_m = 0.0
+        self._obj_short_len_m = 0.0
+
         # ── TF2 缓冲与监听器 ──
         # cache_time 调大到 120s: Step2 的 SAM2 推理 ~1s, 但若 TF 失败进入
         # while 重试, 累积可达数十秒. 默认 10s cache 会在 SAM 完成前就把点云
@@ -423,6 +427,39 @@ class XTrainerTask(Node):
                 time.sleep(0.05)
                 continue
             dir_xy = dir_xy / len_xy
+
+            # 短轴 3D 长度 (与长轴同法, 梯形矫正): 短轴方向 = 长轴法向量,
+            # 短边像素长 = min(w,h). 短轴端点经 pixel_to_base_link 变换求距离.
+            short_axis = np.array(
+                [-axis[1], axis[0]], dtype=np.float32)
+            short_pixel = min(fit["rect"][1][0], fit["rect"][1][1])
+            short_half = short_pixel / 2.0
+            q0_img = (
+                cx_img - short_axis[0] * short_half,
+                cy_img - short_axis[1] * short_half)
+            q1_img = (
+                cx_img + short_axis[0] * short_half,
+                cy_img + short_axis[1] * short_half)
+            q0 = self.pixel_to_base_link(
+                hand_cam, q0_img[0], q0_img[1], window=3)
+            q1 = self.pixel_to_base_link(
+                hand_cam, q1_img[0], q1_img[1], window=3)
+            if q0 is None or q1 is None:
+                self.get_logger().warn(
+                    "TF/depth lookup failed for object short axis; retry.")
+                time.sleep(0.05)
+                continue
+            short_len_xy = float(
+                np.linalg.norm(
+                    (np.asarray(q1, dtype=float)
+                     - np.asarray(q0, dtype=float))[:2]))
+
+            self._obj_long_len_m = len_xy
+            self._obj_short_len_m = short_len_xy
+            ratio = (len_xy / short_len_xy) if short_len_xy > 0 else float("inf")
+            self.get_logger().info(
+                f"Object size: long={len_xy:.4f}m short={short_len_xy:.4f}m "
+                f"ratio={ratio:.2f}")
 
             h_obj = float(c_base[2])
 
@@ -772,7 +809,7 @@ class XTrainerTask(Node):
                 self.get_logger().error(f"################### Moveit {self.pick_arm} Planning Failed #################")
                 return False
             self.mover.execute(plan_result.trajectory)
-            # self.gripper.close("right")
+            self.gripper.close("right")
             time.sleep(1)
             self.gripper.open("left")
 
@@ -817,7 +854,7 @@ class XTrainerTask(Node):
                 return False
             self.mover.execute(plan_result.trajectory)
 
-            # self.gripper.close("left")  
+            self.gripper.close("left")  
             time.sleep(1)
             self.gripper.open("right")
             
@@ -879,8 +916,20 @@ class XTrainerTask(Node):
             self.step_go_up()
             time.sleep(0.5)
 
-            # Step 4.1 handover
-            self.step_handover_rectangle()
+            # Step 4.1 handover: 正方形 (长短边比<1.5) 且两边<5cm → sphere, 否则 rectangle
+            if (self._obj_short_len_m > 0
+                    and self._obj_long_len_m / self._obj_short_len_m < 1.5
+                    and self._obj_long_len_m < 0.05
+                    and self._obj_short_len_m < 0.05):
+                self.get_logger().info(
+                    f"Object is square & small (long={self._obj_long_len_m:.4f}m, "
+                    f"short={self._obj_short_len_m:.4f}m) → step_handover_sphere")
+                self.step_handover_sphere()
+            else:
+                self.get_logger().info(
+                    f"Object not square/small (long={self._obj_long_len_m:.4f}m, "
+                    f"short={self._obj_short_len_m:.4f}m) → step_handover_rectangle")
+                self.step_handover_rectangle()
             while not self.get_logger().info(f"New arm is: {self.pick_arm}"):
                 time.sleep(0.01)
 
