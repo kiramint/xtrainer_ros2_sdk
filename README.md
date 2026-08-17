@@ -15,9 +15,10 @@
 |xtrainer_bridge|Xtrainer ROS2 兼容层|🆗|
 |xtrainer_control|Xtrainer 控制程序|🆗|
 |xtrainer_description|Xtrainer URDF & Meshes|🆗|
-|xtrainer_gripper|Xtrainer 夹爪|⚠️（可能有潜在Bug）|
+|xtrainer_gripper|Xtrainer 夹爪|🆗|
 |xtrainer_task|Xtrainer Demo任务|🆗|
 |moveit_test|Xtrainer Moveit 配置包|🆗|
+|graspnet|GraspNet 集成包|🆗|
 |realsense-ros|Realsense Camera|📦（SubModule）|
 |easy_handeye2|手眼标定|📦（SubModule）|
 
@@ -27,10 +28,7 @@
 
 ## 安装
 
-> [!Note]
->
-> 以下代码仅在zsh中测试过
-
+1. 克隆本仓库，并拉取submodule：`git submodule update --init`
 1. 安装Ubuntu 24.04 + ROS2 Jazzy
 
 ```shell
@@ -59,8 +57,8 @@ sudo apt install ros-jazzy-aruco\*
 > 请按实际情况设置以下环境变量：
 >
 > ```shell
-> export HF_HUB_OFFLINE=1 # HF离线模式
-> export HF_ENDPOINT=https://hf-mirror.com # HF-MIRROR
+> export HF_HUB_OFFLINE=1 # HF离线模式，仅在模型已经下载完后使用，禁止每次启动时下载模型
+> export HF_ENDPOINT=https://hf-mirror.com # HF-MIRROR，国内Huggingface代理
 > ```
 
 4. 配置用户权限与Udev rules：
@@ -88,12 +86,12 @@ pip install -r requirements.txt
 > * 请务必确保`which colcon`的路径在：`/<PATH_TO_CONDA>/miniconda3/envs/xtrainer_env_test/bin/colcon`下，防止shellbang错误无法加载conda环境
 > * 请确保numpy版本为1.26.4，scipy版本为1.13.1
 
-7. 按照官方教程安装GroundingDINO与SAM2（如果仅使用SDK无需安装）
+7. 按照官方教程安装GroundingDINO与SAM2（如果不使用XtrainerTask中的Demo则无需安装）
 
    1. Pytorch: https://pytorch.org/get-started/locally/ (建议安装2.13.0， CUDA12.6)
    2. GroundingDINO：https://github.com/IDEA-Research/GroundingDINO
    3. SAM2：https://github.com/facebookresearch/sam2
-   4. 安装GraspNet：https://github.com/graspnet/graspnet-baseline
+   4. 安装GraspNet（可选）：https://github.com/graspnet/graspnet-baseline
 
 > [!important]
 >
@@ -136,7 +134,7 @@ pip install -r requirements.txt
 >   done
 >   ```
 >
-> * GraspNet
+> * GraspNet（可选）
 >
 >   * 官方项目安装比较困难，且存在一定的兼容性问题，最好安装我修改后的第三方版本：https://github.com/kiramint/graspnet-baseline 本项目基于此版本进行测试。
 >   * 安装我仓库中的README.md安装就好，但是请确认安装后几个库的版本与之前手动安装的一致
@@ -161,36 +159,70 @@ source ./install/setup.<YOUR_SHELL>
 
 ### 硬件调试
 
-* 请从Dobot官网下载Xtrainer的CAD文件：[轻量版3D模型-5.28.step](https://www.dobot.cn/service/download-center?keyword=&type-95%5B%5D=112)，也就是此设备的URDF，并严格按照URDF安装机器人、摄像头以及框架。
+#### 硬件安装
 
-* 安装完成后，请启动MoveIt并按照以下方法检查安装准确性
+* 请从Dobot官网下载Xtrainer的CAD文件：[轻量版3D模型-5.28.step](https://www.dobot.cn/service/download-center?keyword=&type-95%5B%5D=112)，也就是此设备的URDF来源，并严格按照此CAD文件安装机器人、摄像头以及框架，其余安装请参考Dobot X-Trainer用户手册。
 
-  1. 启动MoveIt
+* 各关键参数测量如下：![image-20260817123512490](./README.assets/image-20260817123512490.png)
 
-```
-# 1. 启动机器人驱动
-ros2 launch cr_robot_ros2 xtrainer.launch.py
-# 2. 进入机器人示教模式
-ros2 launch xtrainer_control enable_and_drag.launch.py
-# 3. 启动Moveit
-ros2 launch moveit_test demo.launch.py
-```
+  ![image-20260817123616370](./README.assets/image-20260817123616370.png)
 
-  2. 手动移动机械臂并查看模型与现实区别：
-
-     ![b1bf22d0115cfc25ab96bdbf16f30ff4](./README.assets/b1bf22d0115cfc25ab96bdbf16f30ff4.jpg)
-     
-     可以看到，URDF中机器人与现实中对应良好
+> [!Tip] 
+>
+> 安装完成并完成“机械臂调试”部分后，可以启动MoveIt并按照以下方法检查安装准确性：
+>
+> 1. 启动MoveIt
+>
+> ```shell
+> # 1. 启动机器人驱动
+> ros2 launch cr_robot_ros2 xtrainer.launch.py
+> # 2. 进入机器人拖动示教模式
+> ros2 launch xtrainer_control enable_and_drag.launch.py
+> # 3. 启动Moveit
+> ros2 launch moveit_test demo.launch.py
+> ```
+>
+>   2. 手动移动机械臂并查看模型与现实区别：
+>
+>      <img src="./README.assets/b1bf22d0115cfc25ab96bdbf16f30ff4.jpg" alt="b1bf22d0115cfc25ab96bdbf16f30ff4" style="zoom:33%;" />
+>
+>      可以看到，URDF中机器人与现实中对应良好
 
 > [!CAUTION]
 >
 > 错误的安装会导致运动规划结果与现实不一致，而且会导致碰撞检测失效，造成危险与财产损失
 
-* 请按照使用DobotStudio Pro让机器人进入TCP/IP控制二次开发模式
+#### 机械臂调试
 
-### 相机标定
+* 请在[越江官网](https://www.dobot.cn/service/download-center?keyword=&type-95%5B%5D=112)下载DobotStudio Pro机械臂上位机：
 
-* 请按照以下流程进行相机标定
+  <img src="./README.assets/image-20260817115230977.png" alt="image-20260817115230977" style="zoom: 25%;" />
+
+* 连接机械臂后，按下图修改机器人安全设置：
+
+  <img src="./README.assets/image-20260817115419872.png" alt="image-20260817115419872" style="zoom: 33%;" />
+
+* 修改远程控制模式让机器人进入TCP/IP控制二次开发模式：
+
+  <img src="./README.assets/image-20260817115501342.png" alt="image-20260817115501342" style="zoom: 33%;" />
+
+> ​	[!Note]
+>
+> 机械臂运动到关节限位时，也需要使用此工具将机械臂移出限位。在未使能的情况下解除限位关节的抱闸，并移动关节到正常位置：
+>
+> <img src="./README.assets/image-20260817122250041.png" alt="image-20260817122250041" style="zoom: 33%;" />
+
+### 软件调试
+
+#### 相机标定
+
+> [!Note]
+>
+> * 此项目使用78mm宽的Origin ArUco Marker ID 99标定版，若您使用的标定版不一致，请修改`calibrate_<CAMERA>.launch.py`中的`aruco_single_params`
+> * 顶部相机为eye_on_base标定，请确保标定版夹在左机械臂夹爪上。左右手相机为eye_in_hand标定，请确保标定版在桌面上固定不动
+> * 如果rviz无法夹在标定程序，需要让rqt强制搜索插件`rqt --force-discover --list-plugins`
+
+1. 请按照以下流程启动相机标定程序
 
 ```shell
 # 1. 启动机器人驱动
@@ -201,32 +233,32 @@ ros2 launch xtrainer_control enable_and_drag.launch.py
 ros2 launch xtrainer_control calibrate_<CAMERA>.launch.py
 ```
 
-标定完成后运行`ros2 launch xtrainer_control start.launch.py`后，再启动rqt，使用TF Tree插件应该可以看到完整的TF树，如下图所示
+2. 当上面的软件启动完成后，需要再打开一个rqt窗口，并加载Image View，订阅`/aruco_single/result`话题:
 
-![Snipaste_2026-07-24_16-04-30](./README.assets/Snipaste_2026-07-24_16-04-30.png)
+<img src="./README.assets/image-20260817120134495.png" alt="image-20260817120134495" style="zoom:33%;" />
 
-> [!Note]
->
-> * 此项目使用78mm宽的Origin ArUco Marker ID 99标定版，若您使用的标定版不一致，请修改`calibrate_<CAMERA>.launch.py`
-> * 具体标定过程参考easy_handeye2：https://github.com/marcoesposito1988/easy_handeye2
-> * 标定结果在：`~/.ros2/easy_handeye2/calibrations/`下，若存在则会启动发布程序
+3. 当ArUco码被识别后，程序就会弹出标定界面，点击Take sample即可拍摄一帧画面。需要反复移动机械臂，拍摄20张左右，然后点击Save保存标定结果。
+
+4. 标定完成后运行`ros2 launch xtrainer_control start.launch.py`后，再启动rqt，使用TF Tree插件应该可以看到完整的TF树，如下图所示：![Snipaste_2026-07-24_16-04-30](./README.assets/Snipaste_2026-07-24_16-04-30.png)
 
 > [!Tip]
 >
 > * 请确保标定版清晰且平整，建议使用相片纸打印或直接购买成品标定版
 > * 标定程序只会启动单个需要标定的相机。当正式运行程序时，会启动三个相机，此时USB带宽将达到15Gbps，建议尽量将相机分别插在不同的USB根集线器上，防止相机与USB控制器崩溃
 > * easy_handeye2似乎与深度学习环境不兼容，建议在conda环境外编译运行标定程序
+> * 标定过程中需确保ArUco码识别结果稳定不抖动后再标定，否则可能会影响标定精度。完成标定好可以参考easy_handeye2运行evaluation，检验标定准确性
+> * 标定结果在：`~/.ros2/easy_handeye2/calibrations/`下，若存在则会启动标定结果发布程序
 
 ## 运行
 
-### 前置启动项
+### 前置启动项（机器人ROS2驱动）
 
 * 下面的启动项二选一（建议第一个）
 
 ```shell
-# 启动 Xtrainer 驱动及配套硬件
+# 启动 Xtrainer 驱动及配套硬件（包括夹爪、摄像头、标定结果发布程序等）
 ros2 launch xtrainer_control start.launch.py
-# 仅启动机械臂而不启动相机、夹爪、easy_handeye2
+# 仅启动机械臂驱动
 ros2 launch cr_robot_ros2 xtrainer.launch.py
 ```
 
@@ -246,15 +278,21 @@ ros2 launch xtrainer_control disable.launch.py
 > [!TIP]
 >
 > 如果去要取消示教，请按下机械臂末端的按钮
+>
+> 可以在未启动机器人驱动的情况下使用：https://github.com/kiramint/xtrainer_toolkit启动机械臂，或进行清除错误，拖动示教等操作
 
-### MoveIt
+### MoveIt2
 
 ```shell
 # 启动 Move Group 与 Rviz2
 ros2 launch moveit_test demo.launch.py
-# 仅启动 Move Group
+# 仅启动 Move Group（用于程序调用）
 ros2 launch moveit_test move_group.launch.py
 ```
+
+> [!Note]
+>
+> 在Wayland下MoveIt与Rviz2可能出现渲染异常，请执行`export QT_QPA_PLATFORM=xcb`强制X11渲染 
 
 ### 夹爪
 
@@ -266,10 +304,6 @@ ros2 launch xtrainer_gripper gripper_open.launch.py
 # 闭合夹爪
 ros2 launch xtrainer_gripper gripper_close.launch.py
 ```
-
-> [!NOTE]
->
-> 在Wayland下MoveIt与Rviz2可能出现渲染异常，请执行`export QT_QPA_PLATFORM=xcb`强制X11渲染
 
 ### 运行 Demo 程序
 
@@ -284,11 +318,17 @@ ros2 launch xtrainer_task goto_pose.launch.py
 ros2 run xtrainer_task dino_test --ros-args -p prompt:="bottle" -p image_topic:="/camera/camera_top/color/image_raw"
 ```
 
-#### 开瓶盖 Demo
+#### 运行 Demo
 
 ```shell
-# 运行任务
-ros2 launch xtrainer_task start.launch.py
+# 饮品瓶盖精准拧开
+ros2 launch xtrainer_task start_open_bottle.launch.py
+# 吸管精准插入饮品
+ros2 launch xtrainer_task start_insert——straw.launch.py
+# 废料稳定抓取
+ros2 launch xtrainer_task start_grasp——plane.launch.py
+# 废料稳定抓取+空中传递
+ros2 launch xtrainer_task start_grasp——plane_handover.launch.py
 ```
 
 ## 关键命名空间、话题与服务
