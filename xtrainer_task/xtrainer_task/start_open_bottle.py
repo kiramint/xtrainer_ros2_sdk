@@ -271,7 +271,6 @@ class XTrainerTask(Node):
 
             self._publish_detection_marker(mid_coordinate)
 
-            # 15cm away from bottle
             pose_approach = Pose()
             pose_approach.position.x = mid_coordinate[0]
             pose_approach.position.y = mid_coordinate[1]
@@ -297,7 +296,7 @@ class XTrainerTask(Node):
         self.gripper.close("left")
 
         """
-        Step 3: Move right hand TODO:
+        Step 3: Move right hand
         """
 
         # Panning Loop

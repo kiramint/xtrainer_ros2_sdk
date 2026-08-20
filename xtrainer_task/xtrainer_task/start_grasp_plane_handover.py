@@ -930,8 +930,7 @@ class XTrainerTask(Node):
                     f"Object not square/small (long={self._obj_long_len_m:.4f}m, "
                     f"short={self._obj_short_len_m:.4f}m) → step_handover_rectangle")
                 self.step_handover_rectangle()
-            while not self.get_logger().info(f"New arm is: {self.pick_arm}"):
-                time.sleep(0.01)
+            self.get_logger().info(f"New arm is: {self.pick_arm}")
 
             # Step 5: Place object
             self.get_logger().info("Step 5: Place object")

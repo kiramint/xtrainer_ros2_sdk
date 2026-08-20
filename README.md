@@ -155,6 +155,21 @@ colcon build
 source ./install/setup.<YOUR_SHELL>
 ```
 
+9. 修改代码中模型位置参数
+
+* 打开`xtrainer_task/xtrainer_task/dino_wrapper.py`修改以下参数
+
+```python
+# ── 默认模型路径 (相对于 Grounded-SAM-2 仓库根目录) ──────────────────
+_GSAM2_ROOT = Path("/path/to/Grounded-SAM-2")
+
+_DEFAULT_SAM2_CHECKPOINT = str(_GSAM2_ROOT / "checkpoints" / "sam2.1_hiera_large.pt")
+# SAM2 的 Hydra config 路径是相对于 sam2 包内部的 configs/ 目录
+_DEFAULT_SAM2_CONFIG = "configs/sam2.1/sam2.1_hiera_l.yaml"
+_DEFAULT_GDINO_CONFIG = str(_GSAM2_ROOT / "grounding_dino" / "groundingdino" / "config" / "GroundingDINO_SwinT_OGC.py")
+_DEFAULT_GDINO_CHECKPOINT = str(_GSAM2_ROOT / "gdino_checkpoints" / "groundingdino_swint_ogc.pth")
+```
+
 ## 调试
 
 ### 硬件调试
