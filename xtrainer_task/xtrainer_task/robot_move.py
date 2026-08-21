@@ -59,6 +59,7 @@ class RobotMover:
     | ``'ompl'``     | ompl                              | RRTConnectkConfigDefault    |
     | ``'pilz_ptp'`` | pilz_industrial_motion_planner    | PTP  (point-to-point/joint) |
     | ``'pilz_lin'`` | pilz_industrial_motion_planner    | LIN  (linear/Cartesian)     |
+    | ``'pilz_cap_ptp'`` | pilz_industrial_motion_planner | PTP  (low-speed, cap-twisting) |
 
     Usage (with launch file providing configs)
     ------------------------------------------

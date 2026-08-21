@@ -8,20 +8,24 @@
 
 ```shell
 xtrainer_task
-├── launch/													# 程序启动launchfile
-└── xtrainer_task										# Demo代码
-    ├── dino_test.py								# 测试GroundingDINO
-    ├── dino_wrapper.py							# GroundingDINO Wrapper
-    ├── goto_pose.py								# 运行到Home位置
-    ├── graspnet_test.py						# GraspNet测试
-    ├── read_pose.py								# 读取机械臂末端位姿
-    ├── robot_move.py								# MoveIt Wrapper
-    ├── sam_detection_test.py				# Sam AutomaticMaskGenerator测试
-    ├── start_grasp_garbage.py			# 废料稳定抓取到GraspNet实现（因D405相机点云质量差效果不佳）
-    ├── start_grasp_plane.py				# 废料抓取Demo
-    ├── start_grasp_plane_handover.py		# 废料抓取+空中传递物品Demo
-    ├── start_insert_straw.py				# 插吸管Demo
-    └── start_open_bottle.py				# 开瓶盖Demo
+├── launch/                              # 程序启动 launch file
+└── xtrainer_task                        # Demo 代码
+    ├── dino_test.py                     # 测试 GroundingDINO
+    ├── dino_wrapper.py                  # GroundingDINO + SAM2 Wrapper
+    ├── dino_pose_test.py                # DINO 检测 + 最小外接矩形方向估计测试
+    ├── detect_desk_object.py            # 白色桌面检测 → ROI → SAM2 自动掩码 → 物体点云 + GraspNet
+    ├── goto_pose.py                     # 运行到 Home 位置
+    ├── graspnet_test.py                 # GraspNet 测试
+    ├── graspnet_sam_test.py             # DINO+SAM2 mask → 点云子集 → GraspNet 测试
+    ├── graspnet_sam_region_test.py      # 白色方块区域内物体 GraspNet 抓取测试
+    ├── read_pose.py                     # 读取机械臂末端位姿
+    ├── robot_move.py                    # MoveIt Wrapper
+    ├── sam_detection_test.py            # SAM AutomaticMaskGenerator 测试
+    ├── start_grasp_garbage.py           # 废料稳定抓取到 GraspNet 实现（因 D405 相机点云质量差效果不佳）
+    ├── start_grasp_plane.py             # 废料抓取 Demo
+    ├── start_grasp_plane_handover.py    # 废料抓取 + 空中传递物品 Demo
+    ├── start_insert_straw.py            # 插吸管 Demo
+    └── start_open_bottle.py             # 开瓶盖 Demo
 ```
 
 ## Entry Points
@@ -32,6 +36,7 @@ xtrainer_task
 | `start_insert_straw.launch.py` | 插吸管 Demo 启动 |
 | `start_grasp_plane.launch.py` | 废料抓取 Demo 启动 |
 | `start_grasp_plane_handover.launch.py` | 废料抓取 + 空中传递物品 Demo 启动 |
+| `start_grasp_garbage.launch.py` | 废料稳定抓取（GraspNet）Demo 启动 |
 | `read_pose.launch.py` | 读取姿态启动 |
 | `goto_pose.launch.py` | 归零位启动 |
 
@@ -39,27 +44,136 @@ xtrainer_task
 
 ### robot_move.py — 运动控制
 
-基于 MoveItPy `PlanningComponent` 的运动控制封装：
+基于 MoveItPy（`MoveItPy` + `PlanningComponent`，进程内规划库，ROS2 Jazzy `moveit_py` API）的双臂运动控制封装，为 Arm1（左臂，末端 `L1_gripper_tcp`）与 Arm2（右臂，末端 `L2_gripper_tcp`）提供规划、执行与位姿查询接口。
+
+MoveItPy 是进程内规划库，与 move_group 平级替代（非其 client），无需 move_group 节点。配置（URDF/SRDF/ompl_planning/kinematics 等）由 ROS 2 参数传入：launch 文件用 `MoveItConfigsBuilder` 加载 `moveit_test` 包的模型配置与 `xtrainer_task/config/moveit_cpp.yaml`（见各 `start_*.launch.py`）。
+
+#### Planner 枚举
+
+| planner | pipeline | planner_id | 说明 |
+|---------|----------|------------|------|
+| `Planner.ompl` | ompl | RRTConnectkConfigDefault | 默认，OMPL 随机采样规划 |
+| `Planner.pilz_ptp` | pilz_industrial_motion_planner | PTP | 点到点关节运动，确定性 |
+| `Planner.pilz_lin` | pilz_industrial_motion_planner | LIN | 笛卡尔直线插补 |
+| `Planner.pilz_cap_ptp` | pilz_industrial_motion_planner | PTP | 拧瓶盖专用低速 PTP（速度缩放 0.15 / 加速度 0.08，见 `moveit_cpp.yaml`），减少夹持瓶盖时的冲击与打滑 |
+
+所有规划方法均接受 `planner` 关键字参数，可传枚举或字符串（`'ompl'` / `'pilz_ptp'` / `'pilz_lin'` / `'pilz_cap_ptp'`）。
+
+#### 方法
 
 | 方法 | 说明 |
 |------|------|
-| `plan_joints(target)` | 关节空间规划 |
-| `plan_pose(target, frame)` | 笛卡尔空间规划 |
-| `execute()` | 执行已规划轨迹 |
-| `plan_and_execute_joints(target)` | 规划并执行（关节空间） |
-| `plan_and_execute_pose(target, frame)` | 规划并执行（笛卡尔空间） |
+| `get_current_pose(arm, *, tip_link=None)` | 查询当前末端位姿（`base_link` 系，`geometry_msgs/Pose`） |
+| `get_current_joint_positions(arm)` | 查询当前关节角（弧度） |
+| `plan_named(arm, target_name, *, planner=ompl)` | 规划到 SRDF 命名位姿（group_state，如 `'Home1'` / `'Home2'`） |
+| `plan_joint_delta(arm, joint_name, delta_rad, *, planner=pilz_ptp)` | 单关节相对运动规划，目标越界抛 `ValueError` |
+| `plan_joints(arm, joint_values, *, planner=ompl)` | 关节空间规划，`joint_values` 为 6 个弧度值 |
+| `plan_pose(arm, target_pose, *, frame_id='base_link', planner=ompl, tip_link=None)` | 笛卡尔空间规划（Pose + IK） |
+| `execute(trajectory)` | 执行已规划轨迹（传 `plan_result.trajectory`），返回 `bool` |
+| `plan_and_execute_joints(arm, joint_values, *, planner=ompl)` | 规划并执行（关节空间） |
+| `plan_and_execute_pose(arm, target_pose, *, frame_id='base_link', planner=ompl, tip_link=None)` | 规划并执行（笛卡尔空间） |
 
-规划成功后自动推送轨迹到 RViz（`/display_planned_path`）。
+规划成功返回 `PlanResult`（失败返回 `None`），并自动把轨迹发布到 RViz `/display_planned_path`（`DisplayTrajectory`，配合 `config/xtrainer.rviz` 的 Trajectory display 显示）。
+
+#### tip_link 选择
+
+- 默认末端为 TCP：`L1_gripper_tcp` / `L2_gripper_tcp`（历史兼容，行为不变）
+- 抓取尖端：`L1_gripper_tip` / `L2_gripper_tip`（URDF 中位于 `L*_6` 局部 Z 轴 0.195 m 处），通过 `tip_link=` 显式选择：
+  `mover.plan_pose('Arm1', pose, tip_link='L1_gripper_tip')`。
+  `get_current_pose()` / `plan_pose()` / `plan_and_execute_pose()` 支持该参数。
+
+#### 用法示例
+
+```python
+import rclpy
+from moveit.planning import MoveItPy
+from xtrainer_task.robot_move import Planner, RobotMover
+
+rclpy.init()
+node = rclpy.create_node('my_node')
+moveit = MoveItPy(node_name='xtrainer_task_moveit')   # 配置从参数服务器读取
+mover = RobotMover(moveit, node)
+
+# 关节空间 (默认 OMPL)
+plan = mover.plan_joints('Arm1', [0.0] * 6)
+# 指定 Pilz PTP / 笛卡尔 LIN
+plan = mover.plan_joints('Arm1', [0.0] * 6, planner='pilz_ptp')
+plan = mover.plan_pose('Arm2', target_pose, planner=Planner.pilz_lin)
+# 命名位姿 (SRDF group_state)
+plan = mover.plan_named('Arm1', 'Home1')
+if plan is not None:
+    mover.execute(plan.trajectory)
+
+rclpy.shutdown()
+```
+
+launch 方式：`ros2 launch xtrainer_task start_open_bottle.launch.py`（可加 `use_rviz:=false` 禁用 RViz）。
 
 ### dino_wrapper.py — 目标检测
 
-封装 GroundingDINO，订阅相机话题进行目标检测：
+封装 GroundingDINO（文本提示检测）+ SAM2（实例分割）：`__init__` 时加载模型，`detect()` 输入 BGR 图像与文本 prompt，输出 `DetectionResult`（检测框 + mask + 置信度 + 标签）。模型与依赖位于 `/opt/Project/Grounded-SAM-2/`（conda 环境，含 torch / supervision / sam2 / groundingdino）：
+
+```bash
+export PYTHONPATH=/opt/Project/Grounded-SAM-2/grounding_dino:/opt/Project/Grounded-SAM-2:/home/kira/miniconda3/lib/python3.12/site-packages:$PYTHONPATH
+```
+
+#### 类 `DinoWrapper`
+
+构造参数：
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `sam2_checkpoint` | `/opt/Project/Grounded-SAM-2/checkpoints/sam2.1_hiera_large.pt` | SAM2 权重 |
+| `sam2_config` | `configs/sam2.1/sam2.1_hiera_l.yaml` | SAM2 Hydra 配置（相对 sam2 包内 configs/ 目录） |
+| `gdino_config` | `…/grounding_dino/groundingdino/config/GroundingDINO_SwinT_OGC.py` | GroundingDINO 配置 |
+| `gdino_checkpoint` | `…/gdino_checkpoints/groundingdino_swint_ogc.pth` | GroundingDINO 权重 |
+| `box_threshold` | 0.35 | 检测框置信度阈值 |
+| `text_threshold` | 0.25 | 文本匹配阈值 |
+| `multimask_output` | False | SAM2 是否输出多 mask（True 时自动 argmax 选取最佳） |
+| `use_sam` | True | False 时跳过 SAM2 加载，只做 DINO 检测（返回空 mask） |
+| `device` | 自动（cuda/cpu） | 推理设备 |
+
+方法：
+
+| 方法 | 说明 |
+|------|------|
+| `detect(image, prompt)` | 对 BGR 图像执行 DINO 检测 + SAM2 分割，返回 `DetectionResult` |
+| `annotate(image, result, draw_mask=True)` | 静态方法，在原图上绘制框 + 标签 +（可选）mask 可视化 |
+
+- `detect()` 的 `prompt` 要求**小写、以 `.` 结尾**，多个类别用空格分隔，如 `"bottle. cup."`；无检测时返回空 boxes/masks（不报错）
+- 图像预处理手动实现 `load_image()` 等效变换（最短边缩放到 800、最长边 ≤1333、ImageNet 归一化），规避 torchvision v1/v2 API 差异
+- Ampere+ GPU 自动开启 tf32 加速（`torch.backends.cuda.matmul.allow_tf32`）
+
+#### 数据类 `DetectionResult`
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `boxes` | np.ndarray (N, 4) | 检测框，**xyxy 像素坐标**（非归一化） |
+| `masks` | np.ndarray (N, H, W) | bool 掩码，与输入图像同分辨率 |
+| `scores` | list[float] | 置信度（multimask 时已取最佳 mask 对应值） |
+| `labels` | list[str] | 类别标签 |
+| `image_height` / `image_width` | int | 输入图像尺寸 |
+
+#### 测试脚本 `dino_test.py`
+
+订阅相机彩色话题实时检测，OpenCV 窗口显示（按 `q` 退出）。不依赖 cv_bridge（其与 conda numpy 2.x 冲突），直接解析 `sensor_msgs/Image` 原始数据，支持 `bgr8` / `rgb8` 编码。
 
 ```bash
 ros2 run xtrainer_task dino_test --ros-args \
-  -p prompt:="bottle" \
-  -p image_topic:="/camera/camera_top/color/image_raw"
+  -p prompt:="bottle. cup." \
+  -p image_topic:="/camera/camera_top/color/image_raw" \
+  -p box_threshold:=0.35 \
+  -p text_threshold:=0.25 \
+  -p skip_frames:=0
 ```
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `prompt` | `"objects."` | 检测文本提示（运行中可动态修改） |
+| `image_topic` | `/camera/camera_top/color/image_raw` | 彩色图像话题 |
+| `box_threshold` | 0.35 | 检测框置信度阈值 |
+| `text_threshold` | 0.25 | 文本匹配阈值 |
+| `skip_frames` | 0 | 每隔 N 帧检测一次（0=每帧），跳帧时显示缓存结果 |
 
 ## Demo 框架与调试方法
 

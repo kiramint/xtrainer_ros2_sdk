@@ -40,7 +40,6 @@ setup(
             'start_grasp_plane_handover = xtrainer_task.start_grasp_plane_handover:main',
             'dino_test = xtrainer_task.dino_test:main',
             'dino_pose_test = xtrainer_task.dino_pose_test:main',
-            'dino_contour_test = xtrainer_task.dino_contour_test:main',
             'detect_desk_object = xtrainer_task.detect_desk_object:main',
             'sam_detection_test = xtrainer_task.sam_detection_test:main',
             'read_pose = xtrainer_task.read_pose:main',
