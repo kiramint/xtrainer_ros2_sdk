@@ -221,7 +221,7 @@ _DEFAULT_GDINO_CHECKPOINT = str(_GSAM2_ROOT / "gdino_checkpoints" / "groundingdi
 
   <img src="./README.assets/image-20260817115501342.png" alt="image-20260817115501342" style="zoom: 33%;" />
 
-> ​	[!Note]
+> [!Note]
 >
 > 机械臂运动到关节限位时，也需要使用此工具将机械臂移出限位。在未使能的情况下解除限位关节的抱闸，并移动关节到正常位置：
 >
@@ -237,7 +237,23 @@ _DEFAULT_GDINO_CHECKPOINT = str(_GSAM2_ROOT / "gdino_checkpoints" / "groundingdi
 > * 顶部相机为eye_on_base标定，请确保标定版夹在左机械臂夹爪上。左右手相机为eye_in_hand标定，请确保标定版在桌面上固定不动
 > * 如果rviz无法夹在标定程序，需要让rqt强制搜索插件`rqt --force-discover --list-plugins`
 
-1. 请按照以下流程启动相机标定程序
+1. 修改以下文件中相机SN的定义
+
+   ```shell
+   # 文件：
+   xtrainer_control/launch/start.launch.py
+   xtrainer_control/launch/calibrate_left.launch.py
+   xtrainer_control/launch/calibrate_top.launch.py
+   xtrainer_control/launch/calibrate_right.launch.py
+   
+   # 将相机参数修改为你自己的
+   launch_arguments={
+     # --- SN 绑定 ---
+     "serial_no": "'412622270884'", 	# 相机Seral number
+   }
+   ```
+
+2. 请按照以下流程启动相机标定程序
 
 ```shell
 # 1. 启动机器人驱动
@@ -248,13 +264,13 @@ ros2 launch xtrainer_control enable_and_drag.launch.py
 ros2 launch xtrainer_control calibrate_<CAMERA>.launch.py
 ```
 
-2. 当上面的软件启动完成后，需要再打开一个rqt窗口，并加载Image View，订阅`/aruco_single/result`话题:
+3. 当上面的软件启动完成后，需要再打开一个rqt窗口，并加载Image View，订阅`/aruco_single/result`话题:
 
 <img src="./README.assets/image-20260817120134495.png" alt="image-20260817120134495" style="zoom:33%;" />
 
-3. 当ArUco码被识别后，程序就会弹出标定界面，点击Take sample即可拍摄一帧画面。需要反复移动机械臂，拍摄20张左右，然后点击Save保存标定结果。
+4. 当ArUco码被识别后，程序就会弹出标定界面，点击Take sample即可拍摄一帧画面。需要反复移动机械臂，拍摄20张左右，然后点击Save保存标定结果。
 
-4. 标定完成后运行`ros2 launch xtrainer_control start.launch.py`后，再启动rqt，使用TF Tree插件应该可以看到完整的TF树，如下图所示：![Snipaste_2026-07-24_16-04-30](./README.assets/Snipaste_2026-07-24_16-04-30.png)
+5. 标定完成后运行`ros2 launch xtrainer_control start.launch.py`后，再启动rqt，使用TF Tree插件应该可以看到完整的TF树，如下图所示：![Snipaste_2026-07-24_16-04-30](./README.assets/Snipaste_2026-07-24_16-04-30.png)
 
 > [!Tip]
 >
