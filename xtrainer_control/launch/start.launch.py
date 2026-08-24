@@ -116,6 +116,51 @@ def generate_launch_description():
         }.items(),
     )
 
+    realsense_camera_top_435 = IncludeLaunchDescription(
+            os.path.join(
+                get_package_share_directory("realsense2_camera"),
+                "launch",
+                "rs_launch.py",
+            ),
+            launch_arguments={
+                # --- SN 绑定 ---
+                "serial_no": "'233522074322'",
+                # --- 相机命名与命名空间 ---
+                "camera_name": "camera_top_435",
+                "camera_namespace": "camera",
+                # --- 启用深度与彩色流 ---
+                "enable_depth": "true",
+                "enable_color": "true",
+                "enable_infra": "false",
+                "enable_infra1": "false",
+                # --- 点云 ---
+                # 关闭 realsense 自带点云，改用下方 depth_image_proc 生成
+                # (realsense 的 /depth/color/points 在 depth 坐标系，与 SAM mask 错位)
+                "pointcloud.enable": "false",
+                "pointcloud.ordered_pc": "true",
+                "pointcloud.allow_no_texture_points": "false",
+                "decimation_filter.enable":"true",
+                "spatial_filter.enable":"true",
+                "temporal_filter.enable":"true",
+                "hole_filling_filter.enable":"true",
+                # --- 深度对齐到彩色 (生成对齐的深度图 & 彩色点云) ---
+                "align_depth.enable": "true",
+                # --- 深度着色 (将深度图转为彩色便于可视化) ---
+                "colorizer.enable": "false",
+                # --- 彩色流分辨率 ---
+                "rgb_camera.color_profile": "1280x720x15",
+                "depth_module.depth_profile": "1280x720x15",
+                "depth_module.color_profile": "1280x720x15",
+                "depth_module.infra_profile": "1280x720x15",
+                # --- TF ---
+                "publish_tf": "true",
+                "tf_publish_rate": "0.0",
+                # --- 输出 ---
+                "output": "screen",
+                "log_level": "info",
+            }.items(),
+        )
+
     realsense_camera_left = IncludeLaunchDescription(
         os.path.join(
             get_package_share_directory("realsense2_camera"),
@@ -228,6 +273,22 @@ def generate_launch_description():
             ),
         )
     if os.path.exists(
+            os.path.expanduser(
+                "~/.ros2/easy_handeye2/calibrations/top_435_cam_cal.calib"
+            )
+        ):
+            ld.append(
+                # publish_tf_left
+                IncludeLaunchDescription(
+                    os.path.join(
+                        get_package_share_directory("easy_handeye2"), "launch", "publish.launch.py"
+                    ),
+                    launch_arguments={
+                        "name": "top_435_cam_cal"
+                    }.items()
+                ),
+            )
+    if os.path.exists(
         os.path.expanduser(
             "~/.ros2/easy_handeye2/calibrations/left_cam_cal.calib"
         )
@@ -287,10 +348,12 @@ def generate_launch_description():
             xtrainer_driver,
             gripper_node,
             realsense_camera_top,
+            realsense_camera_top_435,
             realsense_camera_left,
             realsense_camera_right,
             # depth_image_proc 点云节点 (替代 realsense 自带点云，在 color 坐标系下生成)
             _make_pc_node("camera_top"),
+            _make_pc_node("camera_top_435"),
             _make_pc_node("camera_left"),
             _make_pc_node("camera_right"),
             enable_arms,
