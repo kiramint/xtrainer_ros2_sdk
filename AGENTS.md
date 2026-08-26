@@ -897,3 +897,34 @@ MoveItPy 是**进程内**规划库，与 move_group 是**平级替代**，不是
 | `_dilate_mask_3d` 对所有 valid 点 cKDTree.query | 1280×720 下 2-5s | cv2.dilate 自适应 kernel 粗筛, 仅对候选点 query, 加速 28× |
 | 命令笔误: image_topic 和 pointcloud_topic 不同相机 | `pts=0` 但 `dets>0`, 误判为 API bug | 同一相机, 或加 frame_id sanity check |
 | colcon `--symlink-install` ament_python 残留 stale build/lib | 改源码不生效 | `rm -rf build/<pkg> install/<pkg>` 后重新 build |
+
+---
+
+## 本次会话修改记录 (相机高延迟修复, 2026-08-26)
+
+### 问题现象
+
+- `start_grasp_graspnet.py` 在 `launch()` 循环里新增机械臂状态检查后, 相机延迟骤增:
+
+```python
+robot_mode = self._robot_ctrl.get_robot_mode(self.pick_arm)
+if robot_mode == 6:  # Drag
+    self._robot_ctrl.stop_drag(self.pick_arm)
+if robot_mode == 9:  # Error
+    self._robot_ctrl.clear_error_arm(self.pick_arm)
+    self._robot_ctrl.enable_arm(self.pick_arm)
+```
+
+### `xtrainer_control/robot_control.py` — spin_until_future_complete 双重挂载
+
+- [x] **根因**: 任务节点已由 `main()` 的常驻 `MultiThreadedExecutor` spin (`start_grasp_graspnet.py:1773-1777`), 而 `RobotController._call_service`/`get_robot_mode` 内部调 `rclpy.spin_until_future_complete(self._node, ...)` — 它把同一 node 再挂到 global 单线程 executor 并发 spin。Jazzy 的 `Executor.add_node` 无重复挂载保护 → 相机等高频回调被两个 executor 竞争/双重分发, 时序打乱 → 相机延迟骤增 (与 584 行注释记录的 `spin_once` 坑同源)
+- [x] 新增 `_wait_future()`: 若 `node.executor is not None` (已被外部 executor 挂载) 直接轮询 `future.done()` (响应由常驻 executor 完成); 仅独立 CLI 节点 (enable_arms.py 等, 无 executor) 才回退 `spin_until_future_complete`
+- [x] 新增 `_get_client()` 按 `(srv_type, service_name)` 缓存 client: 旧代码每次调用 `create_client` 且从不 destroy, `enable_arm` 轮询模式每秒泄漏一个 DDS client
+- [x] 兼容性: CLI 入口脚本节点未挂 executor, 行为不变
+
+### 陷阱表 (本次新增)
+
+| 陷阱 | 后果 | 对策 |
+| --- | --- | --- |
+| 已挂 executor 的节点内调 `rclpy.spin_until_future_complete(node)` / `spin_once(node)` | node 被挂到 global + 常驻两个 executor 并发 spin, 高频回调双重分发 → 相机延迟骤增 | 判断 `node.executor`, 已挂载则只轮询 future; 或服务调用放独立线程+独立回调组 |
+| 服务调用每次 create_client 不 destroy | DDS 实体累积, 发现流量渐增 | 按 (类型, 服务名) 缓存 client 复用 |
