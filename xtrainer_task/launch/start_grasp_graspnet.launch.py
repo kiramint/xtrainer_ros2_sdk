@@ -46,7 +46,7 @@ def generate_launch_description():
     moveit_py_node = Node(
         name="xtrainer_task_moveit",
         package="xtrainer_task",
-        executable="start_grasp_garbage",
+        executable="start_grasp_graspnet",
         output="screen",
         parameters=[params],
     )

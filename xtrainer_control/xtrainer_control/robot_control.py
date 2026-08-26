@@ -47,8 +47,41 @@ class RobotController:
     def __init__(self, node: Node):
         self._node = node
         self._cb_group = MutuallyExclusiveCallbackGroup()
+        self._clients = {}
 
     # ── 内部工具 ──────────────────────────────────────────────────
+
+    def _get_client(self, srv_type, service_name: str):
+        """按 (服务类型, 服务名) 缓存 client, 避免 create_client 泄漏。"""
+        key = (srv_type.__name__, service_name)
+        client = self._clients.get(key)
+        if client is None:
+            client = self._node.create_client(
+                srv_type, service_name, callback_group=self._cb_group
+            )
+            self._clients[key] = client
+        return client
+
+    def _wait_future(self, future, timeout: float) -> bool:
+        """等待 future 完成, 返回是否成功完成。
+
+        若 node 已挂载到外部 executor (如 MultiThreadedExecutor 常驻 spin),
+        直接轮询 future.done(), 响应回调由常驻 executor 处理。
+        绝不能再调 rclpy.spin_until_future_complete —— 它会把 node 再挂到
+        global executor 与常驻 executor 并发 spin, 相机等高频回调被双重
+        分发、时序打乱 (表现为相机延迟骤增)。
+
+        若 node 未挂载任何 executor (独立 CLI 节点), 回退到自旋等待。
+        """
+        if getattr(self._node, "executor", None) is not None:
+            deadline = time.monotonic() + timeout
+            while not future.done():
+                if time.monotonic() >= deadline or not rclpy.ok():
+                    return False
+                time.sleep(0.005)
+            return future.done()
+        rclpy.spin_until_future_complete(self._node, future, timeout_sec=timeout)
+        return future.done()
 
     def _call_service(
         self, srv_type, service_name: str, timeout: float = 5.0
@@ -59,9 +92,7 @@ class RobotController:
         Returns:
             (success, res_code): success 为 True 表示调用成功, res_code 为服务返回码
         """
-        client = self._node.create_client(
-            srv_type, service_name, callback_group=self._cb_group
-        )
+        client = self._get_client(srv_type, service_name)
 
         # 等待服务就绪
         start = time.time()
@@ -76,9 +107,8 @@ class RobotController:
 
         req = srv_type.Request()
         future = client.call_async(req)
-        rclpy.spin_until_future_complete(self._node, future, timeout_sec=timeout)
 
-        if future.result() is None:
+        if not self._wait_future(future, timeout):
             self._node.get_logger().error(f"Service call {service_name} timed out")
             return False, -1
 
@@ -98,18 +128,15 @@ class RobotController:
         ns = arm_namespace.rstrip("/")
         srv_name = f"/{ns}/dobot_bringup_ros2/srv/RobotMode"
 
-        client = self._node.create_client(
-            RobotMode, srv_name, callback_group=self._cb_group
-        )
+        client = self._get_client(RobotMode, srv_name)
         if not client.wait_for_service(timeout_sec=timeout):
             self._node.get_logger().error(f"RobotMode service not available for {ns}")
             return -1
 
         req = RobotMode.Request()
         future = client.call_async(req)
-        rclpy.spin_until_future_complete(self._node, future, timeout_sec=timeout)
 
-        if future.result() is None:
+        if not self._wait_future(future, timeout):
             self._node.get_logger().error(f"RobotMode call timed out for {ns}")
             return -1
 

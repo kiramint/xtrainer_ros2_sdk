@@ -12,7 +12,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', ['launch/start_open_bottle.launch.py']),
         ('share/' + package_name + '/launch', ['launch/start_insert_straw.launch.py']),
-        ('share/' + package_name + '/launch', ['launch/start_grasp_garbage.launch.py']),
+        ('share/' + package_name + '/launch', ['launch/start_grasp_graspnet.launch.py']),
         ('share/' + package_name + '/launch', ['launch/start_grasp_plane.launch.py']),
         ('share/' + package_name + '/launch', ['launch/start_grasp_plane_handover.launch.py']),
         ('share/' + package_name + '/launch', ['launch/read_pose.launch.py']),
@@ -35,7 +35,7 @@ setup(
         'console_scripts': [
             'start_open_bottle = xtrainer_task.start_open_bottle:main',
             'start_insert_straw = xtrainer_task.start_insert_straw:main',
-            'start_grasp_garbage = xtrainer_task.start_grasp_garbage:main',
+            'start_grasp_graspnet = xtrainer_task.start_grasp_graspnet:main',
             'start_grasp_plane = xtrainer_task.start_grasp_plane:main',
             'start_grasp_plane_handover = xtrainer_task.start_grasp_plane_handover:main',
             'dino_test = xtrainer_task.dino_test:main',

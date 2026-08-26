@@ -128,9 +128,15 @@ class GripperController:
     def _spin_a_bit(self, timeout_sec: float):
         """spin 一次以推进 DDS 发现。
 
-        若 node 已被外部 executor 接管 (任务节点), rclpy.spin_once 会抛异常,
-        此时退化为纯 sleep —— 发现由外部 executor 推进。
+        注意: Jazzy 的 Executor.add_node 没有"已挂其他 executor"的保护,
+        rclpy.spin_once 对已挂外部 executor 的 node 不会抛异常, 而是静默把
+        node 再挂到 global executor 上 → 与外部 executor 并发 spin 同一
+        node, callback 双重分发。因此 node 已挂 executor 时直接 sleep,
+        DDS 发现由外部 executor 推进。
         """
+        if getattr(self._node, "executor", None) is not None:
+            time.sleep(timeout_sec)
+            return
         try:
             rclpy.spin_once(self._node, timeout_sec=timeout_sec)
         except Exception:

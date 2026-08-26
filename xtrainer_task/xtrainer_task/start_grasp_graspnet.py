@@ -33,13 +33,14 @@ from moveit.planning import MoveItPy
 from rclpy.callback_groups import (MutuallyExclusiveCallbackGroup,
                                    ReentrantCallbackGroup)
 from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, QoSProfile
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
 from scipy.spatial.transform import Rotation as R
 from sensor_msgs.msg import CameraInfo, Image, PointCloud2
 from visualization_msgs.msg import Marker
 
 from graspnet.graspnet import GraspNet, pred_decode
+from xtrainer_control.robot_control import RobotController
 from xtrainer_gripper.gripper_control import GripperController
 from xtrainer_task.dino_wrapper import DinoWrapper
 from xtrainer_task.robot_move import Planner, RobotMover
@@ -47,13 +48,25 @@ from xtrainer_task.robot_move import Planner, RobotMover
 _COLOR_ENCODINGS = {"bgr8", "rgb8"}
 _DEPTH_ENCODINGS = {"16UC1", "mono16"}
 
+# 传感器数据 QoS: 只保留最新 1 帧 + 尽力传输。
+# depth=10 Reliable 时, SAM/GraspNet 推理期间回调若被 GIL 挤压, 最多积压
+# 10 帧 (~0.67s @15fps), 推理结束后按旧→新逐帧处理, 表现为陈旧帧延迟;
+# depth=1 + BEST_EFFORT 让执行器永远取最新帧 (与 realsense 的 Reliable
+# 发布端 QoS 兼容: pub RELIABLE + sub BEST_EFFORT 可匹配)。
+_SENSOR_QOS = QoSProfile(
+    depth=1,
+    reliability=ReliabilityPolicy.BEST_EFFORT,
+)
+
 # 彩色 / 对齐深度话题模板
 _COLOR_TOPIC_TEMPLATE = "/camera/{name}/color/image_raw"
 _DEPTH_TOPIC_TEMPLATE = "/camera/{name}/aligned_depth_to_color/image_raw"
 
-_CAMERA_NAMES = ("camera_top", "camera_left", "camera_right")
+# 只使用顶部 D435 相机 (固定安装, eye-on-base), 不订阅左右手腕相机
+_CAMERA_NAMES = ("camera_top_435",)
 
 _CAMERA_OPTICAL_FRAMES: Dict[str, str] = {
+    "camera_top_435": "camera_top_435_color_optical_frame",
     "camera_top": "camera_top_color_optical_frame",
     "camera_left": "camera_left_color_optical_frame",
     "camera_right": "camera_right_color_optical_frame",
@@ -63,29 +76,34 @@ _ARM_TIP = {
     "Arm2": "L2_gripper_tip",
 }
 _ARM_CAM = {
-    "Arm1": "camera_left",
-    "Arm2": "camera_right",
+    "Arm1": "camera_top_435",
+    "Arm2": "camera_top_435",
 }
 _GRIPPER = {
     "Arm1": "left",
     "Arm2": "right",
 }
 
-# ── Step 2 Any Grasp: GroundedSAM2 + GraspNet ──────────────────────────
+# ── Step 2 Any Grasp: SAM automask 物体并集 → GraspNet → mask 过滤 ────
 _GRASP_PC_TOPIC_TEMPLATE = "/camera/{name}/depth/color/points"
-_GRASP_PROMPT = "main object."
 _GRASP_NUM_POINT = 20000
 _GRASP_NUM_VIEW = 300
 # 夹爪长度(depth)上限, 单位 m, 过滤 depth>此值的抓取。9.5cm=0.095
 _GRASP_MAX_DEPTH = 0.095
 _GRASP_TOP_K = 10
-_GRASP_ANGLE_LIMIT = 90  # 接近方向与世界Z轴的最大夹角(度), 0=不过滤
+_GRASP_ANGLE_LIMIT = 25  # 接近方向与世界Z轴的最大夹角(度), 0=不过滤
 _GRASP_MIN_POINTS = 50
+
+# Pre-grasp 后撤距离 (cm): 抓取前夹爪先运动到 grasp 姿态沿局部 -Z 轴
+# (接近方向反方向, 远离物体) 后撤此距离的预备点, 再直线进给到 grasp 点。
+# 调整后撤量改这一个变量即可。
+_GRASP_PRE_GRASP_OFFSET_CM = 10.0
+_GRASP_PRE_GRASP_OFFSET_M = _GRASP_PRE_GRASP_OFFSET_CM / 100.0
 
 _GRASP_Z_LIMIT = 0.0461
 
 # ── Desk Detect: GroundingDINO + SAM2 白色桌面 → ROI → 自动掩码物体分割 ─
-_DESK_CAMERA = "camera_top"
+_DESK_CAMERA = "camera_top_435"
 _DESK_PROMPT = "white square."
 _DESK_ROI_SHRINK_PX = 0           # ROI 整体向内缩 x 像素 (正值缩小)
 _DESK_MIN_AREA_RATIO = 0.002      # 自动掩码面积下限 (相对 ROI 面积比例)
@@ -128,23 +146,31 @@ class XTrainerTask(Node):
         self._moveit = MoveItPy(node_name='xtrainer_task_moveit')
         self.mover = RobotMover(self._moveit, self)
 
+        # 机械臂状态控制 (独立 callback group, 不与 MoveIt/timer 竞争)
+        self._robot_ctrl = RobotController(self)
+
         # Give MoveIt some time to receive latest /joint_states and TF
         self.get_logger().info('Waiting for MoveIt state to populate …')
         time.sleep(2.0)
 
-        # DINO 检测器
+        # DINO 检测器 (SAM2 用 base_plus, 与 start_grasp_plane.py 一致)
         self.dino = DinoWrapper(
             device='cuda', box_threshold=0.35, text_threshold=0.25,
+            sam2_checkpoint="/opt/Project/Grounded-SAM-2/checkpoints/sam2.1_hiera_base_plus.pt",
+            sam2_config="configs/sam2.1/sam2.1_hiera_b+.yaml",
         )
 
         # SAM2 自动掩码生成器 (复用 DinoWrapper 加载的 sam2_model 权重)
         # 用于在白色桌面 ROI 内自动切分桌上各个物体
+        # 参数与 start_grasp_plane.py 一致 (base_plus + 32 点 + 单层裁剪,
+        # 实测该组参数对桌上物品分割效果最好)
         self._amg = SAM2AutomaticMaskGenerator(
             model=self.dino.sam2_model,
-            points_per_side=16,
-            pred_iou_thresh=0.8,
-            stability_score_thresh=0.95,
+            points_per_side=32,
+            pred_iou_thresh=0.85,
+            stability_score_thresh=0.90,
             min_mask_region_area=0,
+            crop_n_layers=0,
             box_nms_thresh=0.7,
             output_mode="binary_mask",
         )
@@ -195,13 +221,13 @@ class XTrainerTask(Node):
         self._cloud_cb_group = MutuallyExclusiveCallbackGroup()
 
 
-        # 为三个相机分别订阅彩色、对齐深度 & 内参话题
+        # 为顶部相机 (camera_top_435) 订阅彩色、对齐深度、内参 & 点云话题
         for name in _CAMERA_NAMES:
             color_topic = _COLOR_TOPIC_TEMPLATE.format(name=name)
             self.create_subscription(
                 Image, color_topic,
                 lambda msg, cam=name: self._color_callback(cam, msg),
-                10,
+                _SENSOR_QOS,
                 callback_group=self._camera_cb_group,
             )
             self.get_logger().info(f"Subscribed color: {color_topic}")
@@ -210,7 +236,7 @@ class XTrainerTask(Node):
             self.create_subscription(
                 Image, depth_topic,
                 lambda msg, cam=name: self._depth_callback(cam, msg),
-                10,
+                _SENSOR_QOS,
                 callback_group=self._camera_cb_group,
             )
             self.get_logger().info(f"Subscribed depth: {depth_topic}")
@@ -228,7 +254,7 @@ class XTrainerTask(Node):
             self.create_subscription(
                 PointCloud2, cloud_topic,
                 lambda msg, cam=name: self._cloud_callback(cam, msg),
-                10,
+                _SENSOR_QOS,
                 callback_group=self._cloud_cb_group,
             )
             self.get_logger().info(f"Subscribed pointcloud: {cloud_topic}")
@@ -243,238 +269,244 @@ class XTrainerTask(Node):
     # Controll Task ####################################################
     # ------------------------------------------------------------------
 
-    def step_approach_object(self,camera_name, mid_x, mid_y):
-        mid_coordinate = self.pixel_to_base_link(camera_name, mid_x, mid_y)             
-        if mid_coordinate is None:
-            self.get_logger().error("Failed to compute 3D coordinate of object center.")
-            return False
-            
-        self._publish_detection_marker(mid_coordinate)
+    def step_any_grasp(self, results):
+        """基于顶部相机 SAM 物体分割结果提取点云 → GraspNet → 抓取。
 
-        # Pose gripper down and 5cm above the object center
-        pose_prepare = Pose()
-        pose_prepare.position.x = mid_coordinate[0]
-        pose_prepare.position.y = mid_coordinate[1]
-        pose_prepare.position.z = mid_coordinate[2] + 0.1
-        pose_prepare.orientation.x = 0.9999995231628418
-        pose_prepare.orientation.y = 7.932441803859547e-06
-        pose_prepare.orientation.z = 0.001016218215227127
-        pose_prepare.orientation.w = 9.80220761448436e-07
+        直接使用顶部相机 (camera_top_435) 完成识别与抓取, 不再依赖
+        左右手腕相机, 也不再先移动到物体上方精拍。
 
-        self.get_logger().info(f"############# Move to pose {pose_prepare} ###############")
+        流程:
+            1. 合并 step_detect_desk_objects 输出的物体 mask 并集
+            2. 取 camera_top_435 有序点云, mask 3D 膨胀后提取场景点云
+            3. GraspNet 检测抓取位姿
+            4. 过滤: 夹取中心 (反投影像素) 必须落在 SAM 物体 mask 内
+            5. 按 score 降序取 top-K, 从最高分开始逐个规划执行
 
-        # Try every arm
-        for _ in range(2):
-            # move arm
-            plan_result = self.mover.plan_pose(self.pick_arm, pose_prepare, planner=Planner.ompl,tip_link=_ARM_TIP[self.pick_arm])
+        Parameters
+        ----------
+        results : list[dict]
+            step_detect_desk_objects 的输出, 每项含 "mask" (H, W) bool。
 
-            if plan_result is None:
-                self.get_logger().error(f"################### Moveit {self.pick_arm} Planning Failed #################")
-                if self.pick_arm == "Arm1":
-                    self.pick_arm = "Arm2"
-                else:
-                    self.pick_arm = "Arm1"
-            else:
-                break
-
-        if plan_result is not None:
-            self.mover.execute(plan_result.trajectory)
-            time.sleep(0.5)
-            return True
-        else:
-            return False
-
-    def step_any_grasp(self):
-        # 夹爪保持张开, 不做闭合/提升。
+        Returns
+        -------
+        bool
+            是否成功抓取 (机械臂到位并闭合夹爪)。
+        """
         grasp_success = False
-        while rclpy.ok() and not grasp_success:
-            # ── 2a. GroundingDINO + SAM2 识别物体 ──────────────
-            image = self.get_latest_color(_ARM_CAM[self.pick_arm])
-            if image is None:
-                self.get_logger().error(f"No {_ARM_CAM[self.pick_arm]} camera image available.")
-                time.sleep(0.05)
-                continue
+        camera_name = _ARM_CAM[self.pick_arm]
 
-            result = self.dino.detect(image, _GRASP_PROMPT)
-            if len(result.boxes) == 0:
-                self.get_logger().warn(
-                    f"No '{_GRASP_PROMPT}' detected for grasp."
-                )
-                time.sleep(0.05)
-                continue
+        # ── 2a. SAM 物体 mask 并集 (图像分辨率) ──────────────
+        if not results:
+            self.get_logger().warn("step_any_grasp: empty object masks.")
+            return False
+        H_img, W_img = results[0]["mask"].shape[:2]
+        mask_union = np.zeros((H_img, W_img), dtype=bool)
+        for r in results:
+            mask_union |= np.asarray(r["mask"], dtype=bool)
 
-            try:
-                annotated_image = self.dino.annotate(
-                    image, result, draw_mask=True
-                )
-            except Exception:
-                annotated_image = image
-            cv2.imshow("Detection Result", annotated_image)
-            cv2.waitKey(1)
-            time.sleep(0.05)
+        # ── 2b. 顶部相机有序点云 → mask 并集点子集 ────────────
+        with self._snapshots_lock:
+            cloud_msg = self._snapshots.get(camera_name, {}).get("points")
 
-            # ── 2b. 驱动发布的有序彩色点云 → 物体点子集 ────────
-            with self._snapshots_lock:
-                cloud_msg = self._snapshots.get(
-                    _ARM_CAM[self.pick_arm], {}
-                ).get("points")
-
-            if cloud_msg is None:
-                self.get_logger().warn(
-                    f"No {_ARM_CAM[self.pick_arm]} point cloud available."
-                )
-                time.sleep(0.05)
-                continue
-
-            try:
-                xyz, rgb, H, W = self._ros_pointcloud_to_organized(
-                    cloud_msg
-                )
-            except Exception as exc:
-                self.get_logger().warn(f"Point cloud parse failed: {exc}")
-                time.sleep(0.05)
-                continue
-
-            valid = np.isfinite(xyz).all(axis=2) & (xyz[..., 2] > 0)
-
-            # 按点云高度中位数从低到高排序, 选最低 (z 最小) 的单个检测 mask
-            mask2d = self._pick_center_mask(result, H, W)
-            if mask2d is None:
-                self.get_logger().warn(
-                    "No usable mask after height selection."
-                )
-                time.sleep(0.05)
-                continue
-
-            self.get_logger().info("start dilating mask")
-            mask2d = self._dilate_mask_3d(
-                mask2d, xyz, self._mask_dilation_m
+        if cloud_msg is None:
+            self.get_logger().warn(
+                f"No {camera_name} point cloud available."
             )
-            self.get_logger().info("complete dilating mask")
+            return False
 
-            sel = mask2d & valid
-            pts = xyz[sel]
-            cols = rgb[sel]
-            if len(pts) < _GRASP_MIN_POINTS:
-                self.get_logger().warn(
-                    f"Object point cloud too small: {len(pts)} pts."
-                )
-                continue
+        try:
+            xyz, rgb, H, W = self._ros_pointcloud_to_organized(cloud_msg)
+        except Exception as exc:
+            self.get_logger().warn(f"Point cloud parse failed: {exc}")
+            return False
 
-            cloud_o3d = o3d.geometry.PointCloud()
-            cloud_o3d.points = o3d.utility.Vector3dVector(pts)
-            cloud_o3d.colors = o3d.utility.Vector3dVector(cols)
+        valid = np.isfinite(xyz).all(axis=2) & (xyz[..., 2] > 0)
 
-            # ── 2c. GraspNet 抓取检测 ──────────────────────────
-            self.get_logger().info("start grasp detection")
-            gg = self._predict_grasps(cloud_o3d)
-            if gg is None or len(gg) == 0:
-                self.get_logger().warn("GraspNet returned no grasps.")
-                continue
+        mask2d = mask_union
+        if mask2d.shape != (H, W):
+            mask2d = cv2.resize(
+                mask2d.astype(np.uint8), (W, H),
+                interpolation=cv2.INTER_NEAREST,
+            ).astype(bool)
 
-            self._show_grasps_o3d(cloud_o3d, gg.to_open3d_geometry_list())
+        self.get_logger().info("start dilating mask")
+        mask2d = self._dilate_mask_3d(mask2d, xyz, self._mask_dilation_m)
+        self.get_logger().info("complete dilating mask")
 
-            # ── 2d. 过滤/排序 → 取前 10 → TF 变换到 base_link ──
-            # 直接以相机 color optical frame 作为 TF 源, 用点云时间戳对齐
-            # (eye-in-hand 相机随手臂移动, 必须用点云采集时刻的 TF)。
-            self.get_logger().info("start filter grasp pose")
-            camera_name = _ARM_CAM[self.pick_arm]
-            optical_frame = _CAMERA_OPTICAL_FRAMES[camera_name]
-            grasp_poses, gripper_geos, grasp_geos_aligned = (
-                self._grasp_group_to_base_poses(
-                    gg, optical_frame, cloud_msg.header.stamp
-                )
+        sel = mask2d & valid
+        pts = xyz[sel]
+        cols = rgb[sel]
+        if len(pts) < _GRASP_MIN_POINTS:
+            self.get_logger().warn(
+                f"Object point cloud too small: {len(pts)} pts."
             )
-            if not grasp_poses:
-                self.get_logger().warn(
-                    "No usable grasp poses after filter/TF."
-                )
-                continue
+            return False
 
+        cloud_o3d = o3d.geometry.PointCloud()
+        cloud_o3d.points = o3d.utility.Vector3dVector(pts)
+        cloud_o3d.colors = o3d.utility.Vector3dVector(cols)
+
+        # ── 2c. GraspNet 抓取检测 ──────────────────────────
+        self.get_logger().info("start grasp detection")
+        gg = self._predict_grasps(cloud_o3d)
+        if gg is None or len(gg) == 0:
+            self.get_logger().warn("GraspNet returned no grasps.")
+            return False
+
+        self._show_grasps_o3d(cloud_o3d, gg.to_open3d_geometry_list())
+
+        # ── 2d. 过滤 (夹取中心须落在 SAM mask 内) / 排序 → TF ─
+        # 顶部相机固定安装 (eye-on-base), 用点云时间戳对齐 TF 即可。
+        self.get_logger().info("start filter grasp pose")
+        optical_frame = _CAMERA_OPTICAL_FRAMES[camera_name]
+        with self._camera_info_lock:
+            cam_info = self._camera_infos.get(camera_name)
+        grasp_poses, gripper_geos, grasp_geos_aligned = (
+            self._grasp_group_to_base_poses(
+                gg, optical_frame, cloud_msg.header.stamp,
+                object_mask=mask_union, camera_info=cam_info,
+            )
+        )
+        if not grasp_poses:
+            self.get_logger().warn(
+                "No usable grasp poses after filter/TF."
+            )
+            return False
+
+        self.get_logger().info(
+            f"Got {len(grasp_poses)} grasp candidates; "
+            "trying best-score first."
+        )
+
+        # 在持久 Open3D 窗口显示物体点云 + top-10 夹爪图标 (复用, 不重复开窗)
+        self._show_grasps_o3d(cloud_o3d, gripper_geos)
+
+        # ── 2e. 从 score 最高开始逐个: pre-grasp → grasp → close ──
+        for idx, (grasp_pose, score) in enumerate(grasp_poses):
+            current_joints = self.mover.get_current_joint_positions(
+                self.pick_arm
+            )
+            grasp_pose = self._tip_toward_tcp_offset(grasp_pose, -0.03)
+            if grasp_pose.position.z < _GRASP_Z_LIMIT:
+                grasp_pose.position.z = _GRASP_Z_LIMIT
+            self._publish_detection_marker(
+                (grasp_pose.position.x, grasp_pose.position.y,
+                 grasp_pose.position.z)
+            )
             self.get_logger().info(
-                f"Got {len(grasp_poses)} grasp candidates; "
-                "trying best-score first."
+                f"Trying grasp candidate {idx + 1}/{len(grasp_poses)} "
+                f"(score={score:.3f}) for {self.pick_arm} ..."
             )
 
-            # 在持久 Open3D 窗口显示物体点云 + top-10 夹爪图标 (复用, 不重复开窗)
-            self._show_grasps_o3d(cloud_o3d, gripper_geos)
+            # Generate pre_grasp
+            pre_grasp_pose = self._tip_toward_tcp_offset(
+                grasp_pose, _GRASP_PRE_GRASP_OFFSET_M
+            )
+            p_pre = pre_grasp_pose.position
+            self.get_logger().info(
+                f"Pre-grasp {idx + 1}: retreat "
+                f"{_GRASP_PRE_GRASP_OFFSET_CM:.1f} cm along -Z to "
+                f"({p_pre.x:.4f}, {p_pre.y:.4f}, {p_pre.z:.4f})"
+            )
 
-            # ── 2e. 从 score 最高开始逐个 plan, 失败换下一个 ──
-            for idx, (grasp_pose, score) in enumerate(grasp_poses):
-                current_joints = self.mover.get_current_joint_positions(
-                    self.pick_arm
-                )
-                grasp_pose = self._tip_toward_tcp_offset(grasp_pose, -0.03)
-                if grasp_pose.position.z < _GRASP_Z_LIMIT:
-                    grasp_pose.position.z = _GRASP_Z_LIMIT
-                self._publish_detection_marker(
-                    (grasp_pose.position.x, grasp_pose.position.y,
-                     grasp_pose.position.z)
-                )
-                self.get_logger().info(
-                    f"Trying grasp candidate {idx + 1}/{len(grasp_poses)} "
-                    f"(score={score:.3f}) for {self.pick_arm} ..."
-                )
-                plan_grasp = self.mover.plan_pose(
-                    self.pick_arm, grasp_pose, planner=Planner.pilz_lin,
-                    tip_link=_ARM_TIP[self.pick_arm],
-                )
-                if plan_grasp is None:
-                    plan_grasp = self.mover.plan_pose(
-                        self.pick_arm, grasp_pose, planner=Planner.pilz_ptp,
-                        tip_link=_ARM_TIP[self.pick_arm],
-                    )
-                    if plan_grasp is None:
-                        self.get_logger().warn(
-                            f"Candidate {idx + 1} plan failed; trying next."
-                        )
-                        continue
-
-                plan_grasp = self._flip_j6_if_needed(
-                    plan_grasp, current_joints, self.pick_arm, idx
-                )
-
-                if not self.mover.execute(plan_grasp.trajectory):
-                    self.get_logger().warn(
-                        f"Candidate {idx + 1} execute failed; trying next."
-                    )
-                    continue
-
-                grasp_success = True
-                self.get_logger().info(
-                    f"Step 2 completed: grasped with {self.pick_arm} "
-                    f"(candidate {idx + 1}, score={score:.3f})."
-                )
-                self._show_success_grasp_o3d(
-                    cloud_o3d, grasp_geos_aligned[idx], score
-                )
-                break
-
-            if not grasp_success:
+            plan_pre = self.mover.plan_pose(
+                self.pick_arm, pre_grasp_pose, planner=Planner.ompl,
+                tip_link=_ARM_TIP[self.pick_arm],
+            )
+            if plan_pre is None:
                 self.get_logger().warn(
-                    "All grasp candidates failed to plan/execute; "
-                    "re-detecting."
+                    f"Candidate {idx + 1} pre-grasp plan failed; "
+                    "trying next."
                 )
+                continue
 
-        # ── 2e. Gripper close ──
+            # 大角度 J6 等价目标修正放在搬运段 (pre-grasp) 完成,
+            # 之后的直线进给段姿态不再大改
+            plan_pre = self._flip_j6_if_needed(
+                plan_pre, current_joints, self.pick_arm, idx
+            )
+
+            if not self.mover.execute(plan_pre.trajectory):
+                self.get_logger().warn(
+                    f"Candidate {idx + 1} pre-grasp execute failed; "
+                    "trying next."
+                )
+                continue
+
+            # ── 2e-2. grasp: 从 pre-grasp 直线进给到抓取点 ──
+            joints_after_pre = self.mover.get_current_joint_positions(
+                self.pick_arm
+            )
+            plan_grasp = self.mover.plan_pose(
+                self.pick_arm, grasp_pose, planner=Planner.pilz_ptp,
+                tip_link=_ARM_TIP[self.pick_arm],
+            )
+            # if plan_grasp is None:
+            #     plan_grasp = self.mover.plan_pose(
+            #         self.pick_arm, grasp_pose, planner=Planner.pilz_ptp,
+            #         tip_link=_ARM_TIP[self.pick_arm],
+            #     )
+            if plan_grasp is None:
+                self.get_logger().warn(
+                    f"Candidate {idx + 1} plan failed; trying next."
+                )
+                continue
+
+            plan_grasp = self._flip_j6_if_needed(
+                plan_grasp, joints_after_pre, self.pick_arm, idx
+            )
+
+            if not self.mover.execute(plan_grasp.trajectory):
+                self.get_logger().warn(
+                    f"Candidate {idx + 1} execute failed; trying next."
+                )
+                continue
+
+            grasp_success = True
+            self.get_logger().info(
+                f"Step 2 completed: grasped with {self.pick_arm} "
+                f"(candidate {idx + 1}, score={score:.3f})."
+            )
+            self._show_success_grasp_o3d(
+                cloud_o3d, grasp_geos_aligned[idx], score
+            )
+            break
+
+        if not grasp_success:
+            self.get_logger().warn(
+                "All grasp candidates failed to plan/execute."
+            )
+            return False
+
+        # ── 2f. Gripper close ──
         self.gripper.close(_GRIPPER[self.pick_arm])
+        return True
 
     def step_go_up(self):
-        pose = self.mover.get_current_pose(self.pick_arm, tip_link=_ARM_TIP[self.pick_arm])
-        z_limit = pose.position.z
-        pose.position.z = z_limit + 0.2
-        while pose.position.z > z_limit:
-            plan_result = self.mover.plan_pose(self.pick_arm, pose, planner=Planner.pilz_lin, tip_link=_ARM_TIP[self.pick_arm])
-            if plan_result is None:
-                self.get_logger().error(f"################### Moveit {self.pick_arm} Planning Failed #################")
-                pose.position.z -= 0.01
-                time.sleep(0.1)
-                continue
-            else:
-                self.mover.execute(plan_result.trajectory)
-                self.get_logger().error(f"################### Moveit {self.pick_arm} Go Up #################")
-                return True
-        return False
+        pose = Pose()
+        if self.pick_arm == "Arm1":
+            pose.position.x = 0.3362
+            pose.position.y = -0.1024
+            pose.position.z = 0.2263
+            pose.orientation.x = 0.9997
+            pose.orientation.y = 0.0087
+            pose.orientation.z = -0.0001
+            pose.orientation.w = 0.0237
+        else:
+            pose.position.x = 0.6619
+            pose.position.y = -0.1021
+            pose.position.z = 0.2238
+            pose.orientation.x = 0.9997
+            pose.orientation.y = 0.0042
+            pose.orientation.z = 0.0017
+            pose.orientation.w = 0.0231
+
+        plan_result = self.mover.plan_pose(self.pick_arm, pose, planner=Planner.pilz_ptp, tip_link=_ARM_TIP[self.pick_arm])
+        if plan_result is None:
+            self.get_logger().error(f"################### Moveit {self.pick_arm} Planning Failed #################")
+            return False
+        self.mover.execute(plan_result.trajectory)
+        return True
 
     def step_place_object(self):
         pose = Pose()
@@ -513,41 +545,50 @@ class XTrainerTask(Node):
             if try_times <= 0:
                 break
 
-            # Step 1: Detect desk objects
+            # Step 1: 顶部相机 (camera_top_435) 拍照 → GroundingDINO
+            #         识别 "white square." 桌面 → SAM2AutomaticMaskGenerator
+            #         分割桌上各物品
             self.get_logger().info("Step 1: Detect desk objects")
             results = self.step_detect_desk_objects()
-            if results is None or len(results)==0:
+            if not results:
                 self.get_logger().warn("No desk objects detected, retrying …")
                 time.sleep(0.5)
                 try_times -= 1
                 continue
             try_times = 3
 
-            result = results[0]  # 取高度最低的物体
-            roi = result["roi"]
-            first_mid = ((roi[0] + roi[2]) // 2, (roi[1] + roi[3]) // 2)
-            self.get_logger().info(f"First object ROI: {roi}, mid: {first_mid}")
-
-            # Step 2: Approach object
-            self.get_logger().info("Step 2: Approach object")
-            self.step_approach_object("camera_top",first_mid[0], first_mid[1])
-
-            # Step 3: Detect object and Grasp
-            self.get_logger().info("Step 3: Detect object and Grasp")
-            self.step_any_grasp()
+            # Step 2: GraspNet 检测抓取, 过滤掉夹取中心不落在 SAM
+            #         mask 内的候选, 从 score 最高者开始抓取
+            self.get_logger().info("Step 2: Detect grasps and grasp object")
+            if not self.step_any_grasp(results):
+                self.get_logger().warn("Grasp failed, re-detecting …")
+                try_times -= 1
+                continue
             time.sleep(0.5)
 
-            # Step 4: Go up
-            self.get_logger().info("Go up")
-            self.step_go_up()
+            robot_mode = self._robot_ctrl.get_robot_mode(self.pick_arm)
+            if robot_mode == 6:  # Drag
+                self._robot_ctrl.stop_drag(self.pick_arm)
+            if robot_mode == 9:  # Error
+                self._robot_ctrl.clear_error_arm(self.pick_arm)
+                self._robot_ctrl.enable_arm(self.pick_arm)
 
-            # Step 5: Place object
-            self.get_logger().info("Step 5: Place object")
+            # Step 3: Go up
+            self.get_logger().info("Go up")
+            if not self.step_go_up():
+                plan_result = self.mover.plan_named(self.pick_arm,"Home1")
+                self.mover.execute(plan_result.trajectory)
+
+            # Step 4: Place object
+            self.get_logger().info("Place object")
             self.step_place_object()
 
+        # node 已由 main() 的 MultiThreadedExecutor 常驻 spin,
+        # 这里绝不能再 rclpy.spin_once(self): Jazzy 的 Executor.add_node
+        # 无重复挂载保护, 会把 node 再挂到 global executor 与常驻
+        # executor 并发 spin → callback 双重分发 (相机回调时序被搅乱)
         while rclpy.ok():
-            rclpy.spin_once(self, timeout_sec=0.1)
-            time.sleep(0.01)
+            time.sleep(0.1)
 
     # ------------------------------------------------------------------
     # Desk Detect: GroundingDINO + SAM2 → ROI → SAM2AutomaticMaskGenerator
@@ -1011,90 +1052,6 @@ class XTrainerTask(Node):
 
         return xyz, rgb, H, W
 
-    def _select_mask(self, result, H_pc: int, W_pc: int):
-        """所有检测 mask 并集 → (H_pc, W_pc) bool。无检测返回 None。"""
-        if len(result.boxes) == 0:
-            return None
-
-        masks = result.masks  # (N, H_img, W_img) bool
-        H_img, W_img = masks.shape[1], masks.shape[2]
-
-        # 分辨率不一致时按最近邻缩放 mask 到点云尺寸
-        if (H_img, W_img) != (H_pc, W_pc):
-            resized = np.zeros(
-                (masks.shape[0], H_pc, W_pc), dtype=bool
-            )
-            for i in range(masks.shape[0]):
-                resized[i] = cv2.resize(
-                    masks[i].astype(np.uint8),
-                    (W_pc, H_pc),
-                    interpolation=cv2.INTER_NEAREST,
-                ).astype(bool)
-            masks = resized
-
-        return np.any(masks, axis=0)
-
-    def _pick_center_mask(
-        self, result, H_pc: int, W_pc: int,
-    ):
-        """从检测结果中选出 mask 质心距离画面中心最近的单个 mask。
-
-        对每个 detection mask 计算其质心 (图像坐标), 按与图像中心
-        (W_img/2, H_img/2) 的欧氏距离升序排序, 返回最近的匹配 mask,
-        resize 到点云分辨率。无候选返回 None。
-
-        Parameters
-        ----------
-        result : DetectionResult
-            GroundingDINO + SAM2 检测结果, ``result.masks`` 为 (N, H, W) bool。
-        H_pc, W_pc : int
-            点云高/宽。
-
-        Returns
-        -------
-        np.ndarray or None
-            (H_pc, W_pc) bool 单 mask (最靠近中心者); 无候选返回 None。
-        """
-        if len(result.boxes) == 0 or len(result.masks) == 0:
-            return None
-
-        masks = result.masks  # (N, H_img, W_img)
-        H_img, W_img = masks.shape[1], masks.shape[2]
-        cx_img, cy_img = W_img / 2.0, H_img / 2.0
-
-        candidates = []
-        for i in range(masks.shape[0]):
-            m = masks[i]
-            ys, xs = np.where(m)
-            if len(xs) == 0:
-                candidates.append((i, float("inf")))
-                continue
-            mx = float(np.mean(xs))
-            my = float(np.mean(ys))
-            dist = np.sqrt((mx - cx_img) ** 2 + (my - cy_img) ** 2)
-            candidates.append((i, dist))
-
-        if not candidates:
-            return None
-
-        candidates.sort(key=lambda c: c[1])
-
-        chosen = candidates[0]
-        m_chosen = masks[chosen[0]]
-        if m_chosen.shape != (H_pc, W_pc):
-            m_pc = cv2.resize(
-                m_chosen.astype(np.uint8), (W_pc, H_pc),
-                interpolation=cv2.INTER_NEAREST,
-            ).astype(bool)
-        else:
-            m_pc = m_chosen
-
-        self.get_logger().info(
-            f"Pick center mask: idx={chosen[0]} "
-            f"center_dist={chosen[1]:.1f}px (among {len(candidates)} dets)"
-        )
-        return m_pc
-
     @staticmethod
     def _dilate_mask_3d(mask2d, xyz, radius_m: float):
         """3D 空间膨胀 mask: 保留 mask 点云周围 radius_m (米) 内的所有点云点。
@@ -1207,8 +1164,15 @@ class XTrainerTask(Node):
         gg_array = grasp_preds[0].detach().cpu().numpy()
         return GraspGroup(gg_array)
 
-    def _grasp_group_to_base_poses(self, gg, frame_id: str, stamp):
+    def _grasp_group_to_base_poses(
+        self, gg, frame_id: str, stamp,
+        object_mask=None, camera_info=None,
+    ):
         """过滤/排序 GraspGroup → 取前 10 → 轴重映射 → TF 变换到 base_link。
+
+        若提供 ``object_mask`` (图像分辨率 bool, SAM 物体并集) 与
+        ``camera_info``, 会先过滤掉夹取中心 (反投影像素) 不落在 mask
+        内的候选, 再做 NMS / 角度过滤 / top-K。
 
         GraspNet 姿态 (位于点云所在光学系 color_optical_frame) 先做夹爪
         坐标系→机械臂 tip frame 的轴重映射 (R_tool = R_grasp @ _GRASP_TO_TOOL,
@@ -1237,6 +1201,36 @@ class XTrainerTask(Node):
         if len(gg) == 0:
             self.get_logger().error("No grasp pose due to max depth > _GRASP_MAX_DEPTH")
             return [], [], []
+
+        # ── 过滤: 夹取中心反投影像素必须落在 SAM 物体 mask 并集内 ──
+        # grasp.translation 位于点云坐标系 (= 相机 color optical frame),
+        # 用内参反投影到像素后查 object_mask。
+        if object_mask is not None and camera_info is not None and len(gg) > 0:
+            fx, fy = camera_info.k[0], camera_info.k[4]
+            cx, cy = camera_info.k[2], camera_info.k[5]
+            mh, mw = object_mask.shape[:2]
+            kept = []
+            for i, g in enumerate(gg):
+                gx, gy, gz = (
+                    float(g.translation[0]),
+                    float(g.translation[1]),
+                    float(g.translation[2]),
+                )
+                if gz <= 1e-6:
+                    continue
+                u = int(round(gx / gz * fx + cx))
+                v = int(round(gy / gz * fy + cy))
+                if 0 <= u < mw and 0 <= v < mh and object_mask[v, u]:
+                    kept.append(i)
+            if len(kept) == 0:
+                self.get_logger().error(
+                    "No grasp pose: all grasp centers outside SAM object masks."
+                )
+                return [], [], []
+            self.get_logger().info(
+                f"Mask-center filter: kept {len(kept)}/{len(gg)} grasps."
+            )
+            gg = gg[kept]
 
         gg.nms()
         gg.sort_by_score()
@@ -1383,11 +1377,14 @@ class XTrainerTask(Node):
                     for g in grippers:
                         vis.add_geometry(g, reset_bounding_box=False)
                         shown_geos.append(g)
+                    # 仅在几何更新后重绘。原实现每 10ms 无条件
+                    # update_renderer (~100Hz 全量渲染), 即使画面无变化,
+                    # 常驻抢占 GIL/CPU, 挤压相机等高频回调的执行窗口。
+                    vis.update_renderer()
 
                 if not vis.poll_events():
                     break
-                vis.update_renderer()
-                time.sleep(0.01)
+                time.sleep(0.01 if pending is not None else 0.05)
 
             vis.destroy_window()
         except Exception as exc:
@@ -1405,49 +1402,23 @@ class XTrainerTask(Node):
         gripper_geo,
         score: float,
     ) -> None:
-        """在【新】Open3D 窗口显示真正规划/执行成功的夹爪 (非阻塞, 独立窗口)。
+        """在常驻 Open3D 窗口中显示执行成功的夹爪 (复用单窗口)。
 
-        与 _show_grasps_o3d 的常驻单窗口不同, 该方法每次被调用都新开一个
-        窗口, 只显示物体点云 + 该次成功的那个夹爪 (不再画出全部 top-10)。
-        点云与夹爪几何均位于相机 optical frame, 坐标系一致可直接叠加。
-        按 Esc/Q 或关闭窗口退出。
+        原实现每次抓取成功都新起线程 + 新建 Open3D/GLFW 窗口:
+        连续抓取 2~3 次后, 进程内同时存在多个 GL 上下文/多个可视化
+        线程, 与常驻窗口线程并发调用 GLFW (非线程安全) → 段错误
+        (exit code -11, 且崩溃点总在 "Step 2 completed" 日志之后)。
+
+        现改为把「点云 + 成功的那个夹爪」推送到 _show_grasps_o3d 的
+        常驻窗口 (替代之前的 top-10 显示), 全进程只有一个可视化线程、
+        一个 GL 上下文, 不再崩溃。点云与夹爪均在相机 optical frame,
+        坐标系一致可直接叠加。按 Esc/Q 或关闭窗口退出。
         """
-        def _success_loop():
-            try:
-                vis = o3d.visualization.VisualizerWithKeyCallback()
-                vis.create_window(
-                    window_name=f"Success Grasp - score={score:.3f}",
-                    width=1280,
-                    height=720,
-                )
-                running = True
-
-                def _on_quit(_vis):
-                    nonlocal running
-                    running = False
-                    return False
-
-                vis.register_key_callback(27, _on_quit)       # Esc
-                vis.register_key_callback(ord("Q"), _on_quit)  # Q
-
-                vis.add_geometry(cloud_o3d, reset_bounding_box=True)
-                if gripper_geo is not None:
-                    vis.add_geometry(gripper_geo,
-                                     reset_bounding_box=False)
-
-                while running and rclpy.ok():
-                    if not vis.poll_events():
-                        break
-                    vis.update_renderer()
-                    time.sleep(0.01)
-
-                vis.destroy_window()
-            except Exception as exc:
-                self.get_logger().warn(
-                    f"Open3D success-grasp display failed: {exc}"
-                )
-
-        threading.Thread(target=_success_loop, daemon=True).start()
+        geos = [] if gripper_geo is None else [gripper_geo]
+        self.get_logger().info(
+            f"Success grasp (score={score:.3f}) shown in persistent window."
+        )
+        self._show_grasps_o3d(cloud_o3d, geos)
 
     # ------------------------------------------------------------------
     # 检测点 Marker 可视化

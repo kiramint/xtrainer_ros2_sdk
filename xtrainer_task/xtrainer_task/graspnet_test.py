@@ -50,14 +50,14 @@ class GraspNetTestNode(Node):
         )
 
         # ── 参数 ──────────────────────────────────────────────
-        self.declare_parameter("pointcloud_topic", "/camera/camera_top/depth/color/points")
-        self.declare_parameter("max_distance", 1.5)
+        self.declare_parameter("pointcloud_topic", "/camera/camera_top_435/depth/color/points")
+        self.declare_parameter("max_distance", 2)
         self.declare_parameter("checkpoint_path", model_path)
         self.declare_parameter("num_point", 20000)
         self.declare_parameter("num_view", 300)
         self.declare_parameter("collision_thresh", 0.01)
         self.declare_parameter("voxel_size", 0.01)
-        self.declare_parameter("top_k_grasps", 5)
+        self.declare_parameter("top_k_grasps", 1000000)
         self.declare_parameter("max_grasp_depth", 0.095)
         self.declare_parameter("min_infer_interval", 0.0)
 
