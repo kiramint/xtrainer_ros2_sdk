@@ -19,7 +19,7 @@ class EnableNode(Node):
         super().__init__("enable_arms")
         self.declare_parameter("namespaces", ["Arm1", "Arm2"])
         namespaces = self.get_parameter("namespaces").get_parameter_value().string_array_value
-        timeout = 30.0
+        timeout = 120.0
 
         self.get_logger().info(f"Enabling arms: {namespaces}")
         ok = enable_all(self, namespaces=namespaces, timeout=timeout)

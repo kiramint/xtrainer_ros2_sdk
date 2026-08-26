@@ -63,7 +63,7 @@ def _call_service(node: Node, srv_type, service_name: str, timeout: float = 5.0)
     return True, res.res
 
 
-def _get_robot_mode(node: Node, arm_namespace: str, timeout: float = 5.0) -> int:
+def get_robot_mode(node: Node, arm_namespace: str, timeout: float = 5.0) -> int:
     """
     获取机械臂当前模式 (RobotMode)。
 
@@ -120,7 +120,7 @@ def clear_error_arm(node: Node, arm_namespace: str = "Arm1", timeout: float = 5.
     return True
 
 
-def enable_arm(node: Node, arm_namespace: str = "Arm1", timeout: float = 30.0) -> bool:
+def enable_arm(node: Node, arm_namespace: str = "Arm1", timeout: float = 120.0) -> bool:
     """
     使能指定机械臂: ClearError → PowerOn → 等待上电完成 → EnableRobot。
 
@@ -141,9 +141,9 @@ def enable_arm(node: Node, arm_namespace: str = "Arm1", timeout: float = 30.0) -
     enable_srv = f"/{ns}/dobot_bringup_ros2/srv/EnableRobot"
 
     # ── Step 0: 检查是否已经使能 ──
-    mode = _get_robot_mode(node, ns)
+    mode = get_robot_mode(node, ns)
     node.get_logger().info(f"[{ns}] Initial mode: {mode}")
-    if mode >= ROBOT_MODE_IDLE:  # 5=使能空闲, 6=拖拽, 7=运行中
+    if mode >= ROBOT_MODE_IDLE and mode != ROBOT_MODE_ERROR:  # 5=使能空闲, 6=拖拽, 7=运行中
         node.get_logger().info(f"[{ns}] Already enabled (mode={mode}), skipping")
         return True
 
@@ -168,7 +168,7 @@ def enable_arm(node: Node, arm_namespace: str = "Arm1", timeout: float = 30.0) -
     node.get_logger().info(f"[{ns}] Step 3/4: Waiting for power-on to complete ...")
     start = time.time()
     while time.time() - start < timeout:
-        mode = _get_robot_mode(node, ns)
+        mode = get_robot_mode(node, ns)
         node.get_logger().info(f"[{ns}] Current mode: {mode}")
         if mode == ROBOT_MODE_ERROR:
             node.get_logger().error(f"[{ns}] Arm entered error mode (9), aborting")
