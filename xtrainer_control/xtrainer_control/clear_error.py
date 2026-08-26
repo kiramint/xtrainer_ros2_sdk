@@ -11,7 +11,7 @@ import sys
 import rclpy
 from rclpy.node import Node
 
-from xtrainer_control.robot_control import clear_error_arm
+from xtrainer_control.robot_control import RobotController
 
 
 class ClearErrorNode(Node):
@@ -20,12 +20,13 @@ class ClearErrorNode(Node):
         self.declare_parameter("namespaces", ["Arm1", "Arm2"])
         namespaces = self.get_parameter("namespaces").get_parameter_value().string_array_value
 
+        ctrl = RobotController(self)
         all_ok = True
         for ns in namespaces:
-            if not clear_error_arm(self, ns):
+            if not ctrl.clear_error_arm(ns):
                 all_ok = False
         if all_ok:
-            self.get_logger().info("All arms: clear error OK ✓")
+            self.get_logger().info("All arms: clear error OK")
         else:
             self.get_logger().error("Some arms failed to clear error!")
         sys.exit(0 if all_ok else 1)

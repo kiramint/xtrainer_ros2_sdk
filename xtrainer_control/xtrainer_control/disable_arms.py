@@ -11,7 +11,7 @@ import sys
 import rclpy
 from rclpy.node import Node
 
-from xtrainer_control.robot_control import disable_all
+from xtrainer_control.robot_control import RobotController
 
 
 class DisableNode(Node):
@@ -21,10 +21,11 @@ class DisableNode(Node):
         namespaces = self.get_parameter("namespaces").get_parameter_value().string_array_value
         timeout = 30.0
 
+        ctrl = RobotController(self)
         self.get_logger().info(f"Disabling arms: {namespaces}")
-        ok = disable_all(self, namespaces=namespaces, timeout=timeout)
+        ok = ctrl.disable_all(namespaces=namespaces, timeout=timeout)
         if ok:
-            self.get_logger().info("All arms disabled successfully ✓")
+            self.get_logger().info("All arms disabled successfully")
         else:
             self.get_logger().error("Some arms failed to disable!")
         sys.exit(0 if ok else 1)

@@ -11,7 +11,7 @@ import sys
 import rclpy
 from rclpy.node import Node
 
-from xtrainer_control.robot_control import enable_arm, start_drag
+from xtrainer_control.robot_control import RobotController
 
 
 class EnableAndDragNode(Node):
@@ -20,19 +20,20 @@ class EnableAndDragNode(Node):
         self.declare_parameter("namespaces", ["Arm1", "Arm2"])
         namespaces = self.get_parameter("namespaces").get_parameter_value().string_array_value
 
+        ctrl = RobotController(self)
         all_ok = True
         for ns in namespaces:
-            if not enable_arm(self, ns):
+            if not ctrl.enable_arm(ns):
                 all_ok = False
                 continue
             self.get_logger().info(f"[{ns}] Opening drag teaching mode ...")
-            if not start_drag(self, ns):
+            if not ctrl.start_drag(ns):
                 all_ok = False
                 continue
-            self.get_logger().info(f"[{ns}] Drag teaching mode ON ✓")
+            self.get_logger().info(f"[{ns}] Drag teaching mode ON")
 
         if all_ok:
-            self.get_logger().info("All arms: enable + drag-teaching OK ✓")
+            self.get_logger().info("All arms: enable + drag-teaching OK")
         else:
             self.get_logger().error("Some arms failed!")
         sys.exit(0 if all_ok else 1)

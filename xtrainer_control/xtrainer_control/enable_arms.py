@@ -11,7 +11,7 @@ import sys
 import rclpy
 from rclpy.node import Node
 
-from xtrainer_control.robot_control import enable_all
+from xtrainer_control.robot_control import RobotController
 
 
 class EnableNode(Node):
@@ -21,10 +21,11 @@ class EnableNode(Node):
         namespaces = self.get_parameter("namespaces").get_parameter_value().string_array_value
         timeout = 120.0
 
+        ctrl = RobotController(self)
         self.get_logger().info(f"Enabling arms: {namespaces}")
-        ok = enable_all(self, namespaces=namespaces, timeout=timeout)
+        ok = ctrl.enable_all(namespaces=namespaces, timeout=timeout)
         if ok:
-            self.get_logger().info("All arms enabled successfully ✓")
+            self.get_logger().info("All arms enabled successfully")
         else:
             self.get_logger().error("Some arms failed to enable!")
         sys.exit(0 if ok else 1)
