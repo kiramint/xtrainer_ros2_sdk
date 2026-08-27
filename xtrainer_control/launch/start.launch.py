@@ -139,10 +139,10 @@ def generate_launch_description():
                 "pointcloud.enable": "false",
                 "pointcloud.ordered_pc": "true",
                 "pointcloud.allow_no_texture_points": "false",
-                "decimation_filter.enable":"true",
-                "spatial_filter.enable":"true",
-                "temporal_filter.enable":"true",
-                "hole_filling_filter.enable":"true",
+                # "decimation_filter.enable":"true",
+                # "spatial_filter.enable":"true",
+                # "temporal_filter.enable":"true",
+                # "hole_filling_filter.enable":"true",
                 # --- 深度对齐到彩色 (生成对齐的深度图 & 彩色点云) ---
                 "align_depth.enable": "true",
                 # --- 深度着色 (将深度图转为彩色便于可视化) ---

@@ -89,21 +89,23 @@ _GRIPPER = {
 _GRASP_PC_TOPIC_TEMPLATE = "/camera/{name}/depth/color/points"
 _GRASP_NUM_POINT = 20000
 _GRASP_NUM_VIEW = 300
-# 夹爪长度(depth)上限, 单位 m, 过滤 depth>此值的抓取。9.5cm=0.095
-_GRASP_MAX_DEPTH = 0.095
+# 夹爪宽度上限, 单位 m
+_GRASP_MAX_WIDTH = 0.095
 _GRASP_TOP_K = 10
 _GRASP_ANGLE_LIMIT = 25  # 接近方向与世界Z轴的最大夹角(度), 0=不过滤
 _GRASP_MIN_POINTS = 50
-# Model-free collision filter (GraspNet scene IoU against object cloud)
-_GRASP_COLLISION_VOXEL_SIZE = 0.005
-_GRASP_COLLISION_APPROACH_DIST = 0.03
-_GRASP_COLLISION_THRESH = 0.05
+
 
 # Pre-grasp 后撤距离 (cm): 抓取前夹爪先运动到 grasp 姿态沿局部 -Z 轴
 # (接近方向反方向, 远离物体) 后撤此距离的预备点, 再直线进给到 grasp 点。
 # 调整后撤量改这一个变量即可。
 _GRASP_PRE_GRASP_OFFSET_CM = 10.0
 _GRASP_PRE_GRASP_OFFSET_M = _GRASP_PRE_GRASP_OFFSET_CM / 100.0
+
+# Model-free collision filter (GraspNet scene IoU against object cloud)
+_GRASP_COLLISION_VOXEL_SIZE = 0.005
+_GRASP_COLLISION_APPROACH_DIST = _GRASP_PRE_GRASP_OFFSET_M
+_GRASP_COLLISION_THRESH = 0.05
 
 _GRASP_Z_LIMIT = 0.0461
 
@@ -392,7 +394,7 @@ class XTrainerTask(Node):
         optical_frame = _CAMERA_OPTICAL_FRAMES[camera_name]
         with self._camera_info_lock:
             cam_info = self._camera_infos.get(camera_name)
-        grasp_poses, gripper_geos, grasp_geos_aligned = (
+        grasp_poses, gripper_geos, grasp_geos_aligned, gripper_depth = (
             self._grasp_group_to_base_poses(
                 gg, optical_frame, cloud_msg.header.stamp,
                 object_mask=mask_union, camera_info=cam_info,
@@ -414,10 +416,11 @@ class XTrainerTask(Node):
 
         # ── 2e. 从 score 最高开始逐个: pre-grasp → grasp → close ──
         for idx, (grasp_pose, score) in enumerate(grasp_poses):
+            time.sleep(0.5)
             current_joints = self.mover.get_current_joint_positions(
                 self.pick_arm
             )
-            grasp_pose = self._tip_toward_tcp_offset(grasp_pose, -0.03)
+            grasp_pose = self._tip_toward_tcp_offset(grasp_pose, -gripper_depth[idx])
             if grasp_pose.position.z < _GRASP_Z_LIMIT:
                 grasp_pose.position.z = _GRASP_Z_LIMIT
             self._publish_detection_marker(
@@ -465,6 +468,7 @@ class XTrainerTask(Node):
                 continue
 
             # ── 2e-2. grasp: 从 pre-grasp 直线进给到抓取点 ──
+            time.sleep(0.5)
             joints_after_pre = self.mover.get_current_joint_positions(
                 self.pick_arm
             )
@@ -514,30 +518,21 @@ class XTrainerTask(Node):
         return True
 
     def step_go_up(self):
-        pose = Pose()
-        if self.pick_arm == "Arm1":
-            pose.position.x = 0.3217
-            pose.position.y = -0.0975
-            pose.position.z = 0.5333
-            pose.orientation.x = 0.6618
-            pose.orientation.y = -0.6384
-            pose.orientation.z = 0.2761
-            pose.orientation.w = -0.2796
-        else:
-            pose.position.x = 0.6788
-            pose.position.y = -0.0987
-            pose.position.z = 0.5367
-            pose.orientation.x = 0.6287
-            pose.orientation.y = 0.6488
-            pose.orientation.z = -0.3000
-            pose.orientation.w = -0.3063
-
-        plan_result = self.mover.plan_pose(self.pick_arm, pose, planner=Planner.pilz_ptp, tip_link=_ARM_TIP[self.pick_arm])
-        if plan_result is None:
-            self.get_logger().error(f"################### Moveit {self.pick_arm} Planning Failed #################")
-            return False
-        self.mover.execute(plan_result.trajectory)
-        return True
+        pose = self.mover.get_current_pose(self.pick_arm, tip_link=_ARM_TIP[self.pick_arm])
+        z_limit = pose.position.z
+        pose.position.z = z_limit + 0.2
+        while pose.position.z > z_limit:
+            plan_result = self.mover.plan_pose(self.pick_arm, pose, planner=Planner.pilz_lin, tip_link=_ARM_TIP[self.pick_arm])
+            if plan_result is None:
+                self.get_logger().error(f"################### Moveit {self.pick_arm} Planning Failed #################")
+                pose.position.z -= 0.02
+                time.sleep(0.1)
+                continue
+            else:
+                self.mover.execute(plan_result.trajectory)
+                self.get_logger().error(f"################### Moveit {self.pick_arm} Go Up #################")
+                return True
+        return False
 
     def step_place_object(self):
         pose = Pose()
@@ -604,15 +599,25 @@ class XTrainerTask(Node):
                 self._robot_ctrl.clear_error_arm(self.pick_arm)
                 self._robot_ctrl.enable_arm(self.pick_arm)
 
+            time.sleep(0.5)
+
             # Step 3: Go up
-            self.get_logger().info("Go up")
+            self.get_logger().info("Step 3: Go up")
             if not self.step_go_up():
                 plan_result = self.mover.plan_named(self.pick_arm,"Home1")
                 self.mover.execute(plan_result.trajectory)
 
+            time.sleep(0.5)
+
             # Step 4: Place object
-            self.get_logger().info("Place object")
-            self.step_place_object()
+            self.get_logger().info("Step 4: Place object")
+            if not self.step_place_object():
+                plan_result = self.mover.plan_named(self.pick_arm,"Home1")
+                self.mover.execute(plan_result.trajectory)
+                if not self.step_place_object():
+                    return
+
+            time.sleep(0.5)
 
         # node 已由 main() 的 MultiThreadedExecutor 常驻 spin,
         # 这里绝不能再 rclpy.spin_once(self): Jazzy 的 Executor.add_node
@@ -738,7 +743,6 @@ class XTrainerTask(Node):
                 )
 
         # ── 9. OpenCV 可视化 ────────────────────────────────
-        self.get_logger().info("Step_1a")
         display = self._draw_desk_objects(image, table_mask, roi, results)
         cv2.putText(
             display,
@@ -747,9 +751,7 @@ class XTrainerTask(Node):
             (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2,
         )
         cv2.imshow(_DESK_WINDOW_NAME, display)
-        self.get_logger().info("Step_1b")
         key = cv2.waitKey(1) & 0xFF
-        self.get_logger().info("Step_1c")
         if key == ord('q'):
             self.get_logger().info(
                 "Pressed 'q' in OpenCV window, exiting desk detect loop …"
@@ -1196,7 +1198,7 @@ class XTrainerTask(Node):
         return GraspGroup(gg_array)
 
     def _grasp_group_to_base_poses(
-        self, gg, frame_id: str, stamp,
+        self, gg:GraspGroup, frame_id: str, stamp,
         object_mask=None, camera_info=None,
     ):
         """过滤/排序 GraspGroup → 取前 10 → 轴重映射 → TF 变换到 base_link。
@@ -1225,13 +1227,13 @@ class XTrainerTask(Node):
             以及夹爪几何体 (相机坐标系, 供 Open3D 显示),
             以及与 poses 一一对齐的夹爪几何体 (TF 失败被跳过的候选无对应项)。
         """
-        # 排除夹爪长度(depth) > 9.5cm 的抓取
-        if _GRASP_MAX_DEPTH > 0 and len(gg) > 0:
-            keep = np.where(gg.depths <= _GRASP_MAX_DEPTH)[0]
+        # 排除夹爪宽度 > 9.5cm 的抓取
+        if _GRASP_MAX_WIDTH > 0 and len(gg) > 0:
+            keep = np.where(gg.widths <= _GRASP_MAX_WIDTH)[0]
             gg = gg[keep]
         if len(gg) == 0:
-            self.get_logger().error("No grasp pose due to max depth > _GRASP_MAX_DEPTH")
-            return [], [], []
+            self.get_logger().error("No grasp pose due to max width > _GRASP_MAX_WIDTH")
+            return [], [], [], []
 
         # ── 过滤: 夹取中心反投影像素必须落在 SAM 物体 mask 并集内 ──
         # grasp.translation 位于点云坐标系 (= 相机 color optical frame),
@@ -1257,7 +1259,7 @@ class XTrainerTask(Node):
                 self.get_logger().error(
                     "No grasp pose: all grasp centers outside SAM object masks."
                 )
-                return [], [], []
+                return [], [], [], []
             self.get_logger().info(
                 f"Mask-center filter: kept {len(kept)}/{len(gg)} grasps."
             )
@@ -1300,7 +1302,7 @@ class XTrainerTask(Node):
                         kept.append(i)
                 if len(kept) == 0:
                     self.get_logger().error("No grasp pose due to ang_deg < _GRASP_ANGLE_LIMIT")
-                    return [], [], []
+                    return [], [], [], []
                 gg = gg[kept]
 
         gg = gg[: _GRASP_TOP_K]
@@ -1309,6 +1311,7 @@ class XTrainerTask(Node):
 
         poses = []
         geos_aligned = []
+        gripper_depth = []
         for i, g in enumerate(gg):
             tool_R = g.rotation_matrix @ _GRASP_TO_TOOL
             quat = R.from_matrix(tool_R).as_quat()
@@ -1342,8 +1345,9 @@ class XTrainerTask(Node):
 
             poses.append((transformed.pose, g.score))
             geos_aligned.append(gripper_geos[i])
+            gripper_depth.append(gg.depths[i])
 
-        return poses, gripper_geos, geos_aligned
+        return poses, gripper_geos, geos_aligned, gripper_depth
 
     def _show_grasps_o3d(
         self,
