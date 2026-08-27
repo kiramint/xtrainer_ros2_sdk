@@ -39,6 +39,7 @@ from scipy.spatial.transform import Rotation as R
 from sensor_msgs.msg import CameraInfo, Image, PointCloud2
 from visualization_msgs.msg import Marker
 
+from graspnet.collision_detector import ModelFreeCollisionDetector
 from graspnet.graspnet import GraspNet, pred_decode
 from xtrainer_control.robot_control import RobotController
 from xtrainer_gripper.gripper_control import GripperController
@@ -93,6 +94,10 @@ _GRASP_MAX_DEPTH = 0.095
 _GRASP_TOP_K = 10
 _GRASP_ANGLE_LIMIT = 25  # 接近方向与世界Z轴的最大夹角(度), 0=不过滤
 _GRASP_MIN_POINTS = 50
+# Model-free collision filter (GraspNet scene IoU against object cloud)
+_GRASP_COLLISION_VOXEL_SIZE = 0.005
+_GRASP_COLLISION_APPROACH_DIST = 0.03
+_GRASP_COLLISION_THRESH = 0.05
 
 # Pre-grasp 后撤距离 (cm): 抓取前夹爪先运动到 grasp 姿态沿局部 -Z 轴
 # (接近方向反方向, 远离物体) 后撤此距离的预备点, 再直线进给到 grasp 点。
@@ -342,6 +347,10 @@ class XTrainerTask(Node):
             )
             return False
 
+        mfcdetector = ModelFreeCollisionDetector(
+            pts, voxel_size=_GRASP_COLLISION_VOXEL_SIZE
+        )
+
         cloud_o3d = o3d.geometry.PointCloud()
         cloud_o3d.points = o3d.utility.Vector3dVector(pts)
         cloud_o3d.colors = o3d.utility.Vector3dVector(cols)
@@ -351,6 +360,28 @@ class XTrainerTask(Node):
         gg = self._predict_grasps(cloud_o3d)
         if gg is None or len(gg) == 0:
             self.get_logger().warn("GraspNet returned no grasps.")
+            return False
+
+        # ── 2c-2. ModelFreeCollisionDetector 碰撞过滤 ────────
+        n_before = len(gg)
+        collision_mask, iou_list = mfcdetector.detect(
+            gg,
+            approach_dist=_GRASP_COLLISION_APPROACH_DIST,
+            collision_thresh=_GRASP_COLLISION_THRESH,
+            return_ious=True,
+        )
+        n_collide = int(np.count_nonzero(collision_mask))
+        global_iou = iou_list[0]
+        self.get_logger().info(
+            f"Collision filter: removed {n_collide}/{n_before} grasps "
+            f"(thresh={_GRASP_COLLISION_THRESH}, "
+            f"mean global IoU={float(np.mean(global_iou)):.3f})."
+        )
+        gg = gg[~collision_mask]
+        if len(gg) == 0:
+            self.get_logger().warn(
+                "All grasps in collision with the object cloud."
+            )
             return False
 
         self._show_grasps_o3d(cloud_o3d, gg.to_open3d_geometry_list())
@@ -485,21 +516,21 @@ class XTrainerTask(Node):
     def step_go_up(self):
         pose = Pose()
         if self.pick_arm == "Arm1":
-            pose.position.x = 0.3362
-            pose.position.y = -0.1024
-            pose.position.z = 0.2263
-            pose.orientation.x = 0.9997
-            pose.orientation.y = 0.0087
-            pose.orientation.z = -0.0001
-            pose.orientation.w = 0.0237
+            pose.position.x = 0.3217
+            pose.position.y = -0.0975
+            pose.position.z = 0.5333
+            pose.orientation.x = 0.6618
+            pose.orientation.y = -0.6384
+            pose.orientation.z = 0.2761
+            pose.orientation.w = -0.2796
         else:
-            pose.position.x = 0.6619
-            pose.position.y = -0.1021
-            pose.position.z = 0.2238
-            pose.orientation.x = 0.9997
-            pose.orientation.y = 0.0042
-            pose.orientation.z = 0.0017
-            pose.orientation.w = 0.0231
+            pose.position.x = 0.6788
+            pose.position.y = -0.0987
+            pose.position.z = 0.5367
+            pose.orientation.x = 0.6287
+            pose.orientation.y = 0.6488
+            pose.orientation.z = -0.3000
+            pose.orientation.w = -0.3063
 
         plan_result = self.mover.plan_pose(self.pick_arm, pose, planner=Planner.pilz_ptp, tip_link=_ARM_TIP[self.pick_arm])
         if plan_result is None:
