@@ -11,6 +11,7 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', ['launch/start.launch.py']),
+        ('share/' + package_name + '/launch', ['launch/calibrate_evaluate.launch.py']),
         ('share/' + package_name + '/launch', ['launch/calibrate_top.launch.py']),
         ('share/' + package_name + '/launch', ['launch/calibrate_top_435.launch.py']),
         ('share/' + package_name + '/launch', ['launch/calibrate_left.launch.py']),

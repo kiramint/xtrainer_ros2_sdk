@@ -73,7 +73,8 @@ class RobotController:
 
         若 node 未挂载任何 executor (独立 CLI 节点), 回退到自旋等待。
         """
-        if getattr(self._node, "executor", None) is not None:
+        executor = getattr(self._node, "executor", None)
+        if executor is not None and getattr(executor, "is_spinning", False):
             deadline = time.monotonic() + timeout
             while not future.done():
                 if time.monotonic() >= deadline or not rclpy.ok():
