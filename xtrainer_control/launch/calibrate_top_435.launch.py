@@ -6,7 +6,7 @@ from launch.actions import IncludeLaunchDescription
 from launch_ros.actions import Node
 
 aruco_single_params = {
-        "image_is_rectified": True,
+        "image_is_rectified": False,
         "marker_id": 99,
         "marker_size": 0.078,
         "reference_frame": "camera_top_435_link",
