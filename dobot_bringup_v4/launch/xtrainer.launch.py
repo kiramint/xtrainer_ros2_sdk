@@ -66,6 +66,8 @@ def generate_launch_description():
             "robot_node_name": arm1_info["robot_node_name"],
             "joint_names": arm1_info["joint_names"],
             "JointStatePublishRate": 50.0,
+            "auto_enable": True,
+            "auto_enable_timeout": 60.0,
         }],
     )
 
@@ -83,6 +85,8 @@ def generate_launch_description():
             "robot_node_name": arm2_info["robot_node_name"],
             "joint_names": arm2_info["joint_names"],
             "JointStatePublishRate": 50.0,
+            "auto_enable": True,
+            "auto_enable_timeout": 60.0,
         }],
     )
 

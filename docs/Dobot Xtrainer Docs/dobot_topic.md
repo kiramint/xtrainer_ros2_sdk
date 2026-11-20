@@ -366,9 +366,9 @@
 | FollowJointTrajectory Action | ❌ 不支持 | 虽然 `main.cpp` 拼出了 `/cr5_robot/joint_controller/follow_joint_trajectory` 字符串，但未创建 Action Server |
 | MoveIt Simple Controller Manager | ❌ 不支持 | 缺少 FollowJointTrajectory Action 接口，MoveIt 无法发轨迹 |
 
-### 3.2 moveit_test 配置说明
+### 3.2 xtrainer_moveit 配置说明
 
-`moveit_test/config/` 下的配置文件为 **XTrainer 教学平台** (8 轴双臂) 准备的仿真配置，与当前 CR5 驱动不配套：
+`xtrainer_moveit/config/` 下的配置文件为 **XTrainer 教学平台** (8 轴双臂) 准备的仿真配置，与当前 CR5 驱动不配套：
 
 - `ros2_controllers.yaml`: 使用 `joint_trajectory_controller` 控制 `J1_1~J1_8, J2_1~J2_8`
 - `x_trainer.ros2_control.xacro`: 使用 `mock_components/GenericSystem` (仅仿真)

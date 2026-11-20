@@ -1,7 +1,40 @@
 #include <dobot_bringup/cr_robot_ros2.h>
 #include <sensor_msgs/msg/joint_state.hpp>
 
-CRRobotRos2::CRRobotRos2() : rclcpp::Node("dobot_bringup_ros2"){};
+#include <chrono>
+
+namespace
+{
+
+// 5 使能空闲, 6 拖拽, 7 运行, 8 点动, 10 暂停: 伺服已上电, 抱闸由控制器松开
+bool isBrakeReleased(int mode)
+{
+    return mode == 5 || mode == 6 || mode == 7 || mode == 8 || mode == 10;
+}
+
+bool sleepInterruptible(const std::atomic<bool> &stop, std::chrono::milliseconds total)
+{
+    const auto step = std::chrono::milliseconds(100);
+    auto left = total;
+    while (left.count() > 0)
+    {
+        if (stop.load() || !rclcpp::ok())
+            return false;
+        const auto slice = left > step ? step : left;
+        std::this_thread::sleep_for(slice);
+        left -= slice;
+    }
+    return !stop.load() && rclcpp::ok();
+}
+
+}  // namespace
+
+CRRobotRos2::CRRobotRos2() : rclcpp::Node("dobot_bringup_ros2") {}
+
+CRRobotRos2::~CRRobotRos2()
+{
+    brakeOnExit();
+}
 
 void CRRobotRos2::init()
 {
@@ -285,6 +318,164 @@ kServiceEnableFTSensor = this->create_service<dobot_msgs_v4::srv::EnableFTSensor
     kPublisherInfo = this->create_publisher<std_msgs::msg::String>(topicFeedInfo, 10);
     threadPubFeedBackInfo = std::thread(&CRRobotRos2::pubFeedBackInfo, this);
     threadPubFeedBackInfo.detach();
+
+    // 抱闸生命周期跟驱动进程走: TCP 就绪后解锁, 退出时再抱死。
+    // 不走 ROS service, 避免节点还没 spin 时自己调自己。
+    this->declare_parameter("auto_enable", true);
+    this->declare_parameter("auto_enable_timeout", 60.0);
+    auto_enable_ = this->get_parameter("auto_enable").as_bool();
+    auto_enable_timeout_sec_ = this->get_parameter("auto_enable_timeout").as_double();
+    if (auto_enable_timeout_sec_ < 1.0)
+        auto_enable_timeout_sec_ = 1.0;
+    if (auto_enable_)
+    {
+        RCLCPP_INFO(this->get_logger(),
+                    "auto enable: release brakes after the controller is ready (timeout %.0fs)",
+                    auto_enable_timeout_sec_);
+        auto_enable_thread_ = std::thread(&CRRobotRos2::autoEnableTask, this);
+    }
+    else
+    {
+        RCLCPP_INFO(this->get_logger(), "auto enable: disabled");
+    }
+}
+
+int CRRobotRos2::readRobotMode() const
+{
+    if (!commander_ || !commander_->isConnected())
+        return 0;
+    const RealTimeData data = commander_->getRealData();
+    if (data.len != 1440)
+        return 0;
+    return static_cast<int>(data.robot_mode);
+}
+
+int CRRobotRos2::dashboardCommand(const std::string &cmd)
+{
+    if (!commander_)
+        return -1;
+    int32_t err = -1;
+    if (!commander_->callRosService(cmd, err))
+        return -1;
+    return err;
+}
+
+void CRRobotRos2::autoEnableTask()
+{
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::duration<double>(auto_enable_timeout_sec_);
+    auto logger = this->get_logger();
+    int last_mode = -999;
+
+    auto expired = [&]() {
+        return shutting_down_.load() || !rclcpp::ok() || std::chrono::steady_clock::now() >= deadline;
+    };
+
+    while (!expired())
+    {
+        int mode = readRobotMode();
+        if (mode != last_mode)
+        {
+            RCLCPP_INFO(logger, "auto enable: RobotMode=%d", mode);
+            last_mode = mode;
+        }
+
+        if (isBrakeReleased(mode))
+        {
+            RCLCPP_INFO(logger, "auto enable: brakes released (mode=%d)", mode);
+            return;
+        }
+
+        // 0: 实时反馈还没到; 1: 控制柜仍在初始化, 这时下发控制指令会被拒绝
+        if (mode == 0 || mode == 1)
+        {
+            if (!sleepInterruptible(shutting_down_, std::chrono::milliseconds(300)))
+                return;
+            continue;
+        }
+
+        if (mode == 9 || mode == 11)
+        {
+            const int err = dashboardCommand("ClearError()");
+            RCLCPP_INFO(logger, "auto enable: ClearError err=%d", err);
+            if (!sleepInterruptible(shutting_down_, std::chrono::milliseconds(500)))
+                return;
+            continue;
+        }
+
+        if (mode == 3)
+        {
+            const int err = dashboardCommand("PowerOn()");
+            RCLCPP_INFO(logger, "auto enable: PowerOn err=%d", err);
+            // PowerOn 立即返回, 上电完成大约还要 10 秒。这期间不要重复下发。
+            const auto power_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+            while (!expired() && std::chrono::steady_clock::now() < power_deadline)
+            {
+                mode = readRobotMode();
+                if (mode != 0 && mode != 1 && mode != 3)
+                    break;
+                if (!sleepInterruptible(shutting_down_, std::chrono::milliseconds(300)))
+                    return;
+            }
+            continue;
+        }
+
+        // 有关节抱闸被手动松开时, EnableRobot 会被拒绝。先逐轴锁上再使能。
+        if (mode == 2)
+        {
+            for (int axis = 1; axis <= 6 && !expired(); ++axis)
+            {
+                const int err = dashboardCommand("BrakeControl(" + std::to_string(axis) + ",0)");
+                RCLCPP_INFO(logger, "auto enable: BrakeControl(%d,0) err=%d", axis, err);
+            }
+            if (!sleepInterruptible(shutting_down_, std::chrono::milliseconds(300)))
+                return;
+            continue;
+        }
+
+        if (mode == 4)
+        {
+            const int err = dashboardCommand("EnableRobot()");
+            RCLCPP_INFO(logger, "auto enable: EnableRobot err=%d", err);
+            for (int i = 0; i < 15 && !expired(); ++i)
+            {
+                mode = readRobotMode();
+                if (isBrakeReleased(mode) || mode == 2 || mode == 9 || mode == 11)
+                    break;
+                if (!sleepInterruptible(shutting_down_, std::chrono::milliseconds(200)))
+                    return;
+            }
+            continue;
+        }
+
+        if (!sleepInterruptible(shutting_down_, std::chrono::milliseconds(500)))
+            return;
+    }
+
+    if (!shutting_down_.load())
+        RCLCPP_ERROR(logger, "auto enable: timed out, RobotMode=%d", readRobotMode());
+}
+
+void CRRobotRos2::brakeOnExit()
+{
+    shutting_down_.store(true);
+    if (auto_enable_thread_.joinable())
+        auto_enable_thread_.join();
+    if (braked_.exchange(true))
+        return;
+    if (!commander_)
+        return;
+
+    // 实时口断开时 isConnected() 为 false, 但 Dashboard 可能还在。
+    // 抱闸只走 29999, 连不上时 tcpSend 会立刻失败, 不会卡住退出。
+    const int mode = readRobotMode();
+    if (mode == 6 || mode == 0)
+    {
+        const int err = dashboardCommand("StopDrag()");
+        RCLCPP_INFO(this->get_logger(), "shutdown: StopDrag err=%d (mode=%d)", err, mode);
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+    const int err = dashboardCommand("DisableRobot()");
+    RCLCPP_INFO(this->get_logger(), "shutdown: DisableRobot err=%d (mode was %d)", err, mode);
 }
 
 void CRRobotRos2::pubFeedBackInfo()

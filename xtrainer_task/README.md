@@ -46,7 +46,7 @@ xtrainer_task
 
 基于 MoveItPy（`MoveItPy` + `PlanningComponent`，进程内规划库，ROS2 Jazzy `moveit_py` API）的双臂运动控制封装，为 Arm1（左臂，末端 `L1_gripper_tcp`）与 Arm2（右臂，末端 `L2_gripper_tcp`）提供规划、执行与位姿查询接口。
 
-MoveItPy 是进程内规划库，与 move_group 平级替代（非其 client），无需 move_group 节点。配置（URDF/SRDF/ompl_planning/kinematics 等）由 ROS 2 参数传入：launch 文件用 `MoveItConfigsBuilder` 加载 `moveit_test` 包的模型配置与 `xtrainer_task/config/moveit_cpp.yaml`（见各 `start_*.launch.py`）。
+MoveItPy 是进程内规划库，与 move_group 平级替代（非其 client），无需 move_group 节点。配置（URDF/SRDF/ompl_planning/kinematics 等）由 ROS 2 参数传入：launch 文件用 `MoveItConfigsBuilder` 加载 `xtrainer_moveit` 包的模型配置与 `xtrainer_task/config/moveit_cpp.yaml`（见各 `start_*.launch.py`）。
 
 #### Planner 枚举
 

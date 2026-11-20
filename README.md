@@ -17,7 +17,7 @@
 |xtrainer_description|Xtrainer URDF & Meshes|🆗|
 |xtrainer_gripper|Xtrainer 夹爪|🆗|
 |xtrainer_task|Xtrainer Demo任务|🆗|
-|moveit_test|Xtrainer Moveit 配置包|🆗|
+|xtrainer_moveit|Xtrainer Moveit 配置包|🆗|
 |graspnet|GraspNet 集成包|🆗|
 |realsense-ros|Realsense Camera|📦（SubModule）|
 |easy_handeye2|手眼标定|📦（SubModule）|
@@ -194,7 +194,7 @@ _DEFAULT_GDINO_CHECKPOINT = str(_GSAM2_ROOT / "gdino_checkpoints" / "groundingdi
 > # 2. 进入机器人拖动示教模式
 > ros2 launch xtrainer_control enable_and_drag.launch.py
 > # 3. 启动Moveit
-> ros2 launch moveit_test demo.launch.py
+> ros2 launch xtrainer_moveit demo.launch.py
 > ```
 >
 >   2. 手动移动机械臂并查看模型与现实区别：
@@ -288,15 +288,16 @@ ros2 launch xtrainer_control calibrate_<CAMERA>.launch.py
 
 ```shell
 # 启动 Xtrainer 驱动及配套硬件（包括夹爪、摄像头、标定结果发布程序等）
+# 机械臂在驱动连上控制器后自动解锁抱闸，退出该 launch 时自动锁定
 ros2 launch xtrainer_control start.launch.py
-# 仅启动机械臂驱动
+# 仅启动机械臂驱动（同样会解锁，退出时锁定）
 ros2 launch cr_robot_ros2 xtrainer.launch.py
 ```
 
 ### 机器人维护命令
 
 ```shell
-# 双臂开机使能
+# 中途报警或关闭自动解锁后，手动再使能（正常启动不需要这一步）
 ros2 launch xtrainer_control enable.launch.py
 # 双臂示教
 ros2 launch xtrainer_control enable_and_drag.launch.py
@@ -316,9 +317,9 @@ ros2 launch xtrainer_control disable.launch.py
 
 ```shell
 # 启动 Move Group 与 Rviz2
-ros2 launch moveit_test demo.launch.py
+ros2 launch xtrainer_moveit demo.launch.py
 # 仅启动 Move Group（用于程序调用）
-ros2 launch moveit_test move_group.launch.py
+ros2 launch xtrainer_moveit move_group.launch.py
 ```
 
 > [!Note]

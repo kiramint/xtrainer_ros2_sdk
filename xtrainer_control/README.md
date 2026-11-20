@@ -6,7 +6,7 @@ XTrainer 双臂机器人系统的顶层控制包，负责整机启动、机械�
 
 | 文件 | 说明 |
 |------|------|
-| `start.launch.py` | **主启动**：双臂驱动 + 夹爪 + 三台相机 + 标定 TF 发布 + 自动使能 |
+| `start.launch.py` | **主启动**：双臂驱动 + 夹爪 + 三台相机 + 标定 TF 发布。抱闸由驱动进程负责 |
 | `enable.launch.py` | 一键使能双臂 |
 | `disable.launch.py` | 一键去使能双臂 |
 | `enable_and_drag.launch.py` | 一键使能 + 拖拽示教双臂 |
@@ -23,38 +23,45 @@ XTrainer 双臂机器人系统的顶层控制包，负责整机启动、机械�
 2. **`gripper_node`** — 夹爪节点（单节点管理双臂，话题：`/gripper/left/*`、`/gripper/right/*`）
 3. **RealSense 相机** — `camera_top`、`camera_left`、`camera_right`
 4. **标定 TF 发布** — 自动检测 `~/.ros2/easy_handeye2/calibrations/` 下的标定结果并加载
-5. **延迟 3s 自动使能** — 确保驱动节点 TCP 连接建立后执行 `enable_arms`
+
+机械臂抱闸不在这里做。`cr_robot_ros2_node` 连上控制器后解锁，进程退出时锁定。下面的 `enable_arms` 用于中途报警后再使能，或驱动参数 `auto_enable:=false` 时手动解锁。
 
 ## Entry Points
 
 | 命令 | 功能 | 对应 launch |
 |------|------|-------------|
-| `enable_arms` | 双臂使能（PowerOn→轮询 RobotMode→EnableRobot，幂等） | `enable.launch.py` |
+| `enable_arms` | 按 RobotMode 重试上电/使能，直到抱闸松开（默认每臂 90s） | `enable.launch.py` |
 | `disable_arms` | 双臂去使能 | `disable.launch.py` |
 | `enable_and_drag` | 双臂使能 + 拖拽示教 | `enable_and_drag.launch.py` |
 | `clear_error` | 清除双臂错误 | `clear_error.launch.py` |
 
 ## robot_control.py API
 
-`xtrainer_control.robot_control` 模块提供机械臂状态管理函数：
+这些是 `RobotController` 的方法，不是模块级函数。
 
-| 函数 | 说明 | 参数 |
-|------|------|------|
-| `enable_arm(node, ns, timeout=30)` | 单臂使能（PowerOn→轮询 RobotMode→EnableRobot），已使能则跳过 | node, arm_namespace, timeout |
-| `disable_arm(node, ns, timeout=10)` | 单臂去使能 | node, arm_namespace, timeout |
-| `start_drag(node, ns, timeout=5)` | 单臂拖拽示教开 | node, arm_namespace, timeout |
-| `stop_drag(node, ns, timeout=5)` | 单臂拖拽示教关 | node, arm_namespace, timeout |
-| `enable_all(node, nss, timeout=10)` | 多臂使能，默认 `["Arm1","Arm2"]` | node, namespaces, timeout |
-| `disable_all(node, nss, timeout=10)` | 多臂去使能 | node, namespaces, timeout |
+| 方法 | 说明 | 默认超时 |
+|------|------|----------|
+| `enable_arm(ns)` | 按模式重试：报警先清错，未上电则 PowerOn，模式 2 先逐轴锁抱闸，模式 4 再 EnableRobot。模式进入 5/6/7/8/10 才算成功 | 90s |
+| `disable_arm(ns)` | 拖拽模式先 StopDrag，再 DisableRobot。模式 3/4 视为已经抱闸 | 10s |
+| `start_drag(ns)` | 打开拖拽示教 | 5s |
+| `stop_drag(ns)` | 关闭拖拽示教 | 5s |
+| `enable_all(nss)` | 默认 `["Arm1","Arm2"]`。超时是每条臂各自的上限 | 90s |
+| `disable_all(nss)` | 多臂去使能 | 10s |
 
 ### 使能流程
 
 ```
-PowerOn → 等待 RobotMode ≥ 4 (初始化为 1) → EnableRobot
+读 RobotMode
+  5/6/7/8/10 → 已经解锁
+  9/11       → ClearError，再看
+  0/1        → 控制柜还在起来，继续等
+  3          → PowerOn，等约 10 秒，期间不重复下发
+  2          → BrakeControl(1..6, 0)，再看
+  4          → EnableRobot，确认模式真的变了
 ```
 
-- RobotMode 返回值：1=初始化, 2=抱闸松开, 3=未上电, 4=未使能, 5=使能空闲, 6=拖拽模式, 7=运行中, 9=报错
-- 幂等：若 `RobotMode ≥ 5` 则跳过使能
+- RobotMode：1=初始化, 2=有抱闸松开, 3=未上电, 4=未使能, 5=使能空闲, 6=拖拽, 7=运行, 8=点动, 9=报警, 10=暂停, 11=碰撞
+- 控制器拒绝某一步，或 Dashboard 暂时连不上，会在超时内重试。一次失败不会让整次使能直接返回
 
 ## 标定
 

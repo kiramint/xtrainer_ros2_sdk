@@ -44,14 +44,14 @@ XTrainer 双臂机器人的 URDF 描述文件与 Mesh 3D 模型，供 `robot_sta
 | 角度范围 (rad) | ±6.28 | ±3.14 | ±2.79 | ±6.28 | ±6.28 | ±6.28 |
 | (度) | ±360 | ±180 | ±160 | ±360 | ±360 | ±360 |
 
-> URDF 中 velocity/effort 全部设为 0（不限制），关节级限速由 `moveit_test` 的 `joint_limits.yaml` 管理。
+> URDF 中 velocity/effort 全部设为 0（不限制），关节级限速由 `xtrainer_moveit` 的 `joint_limits.yaml` 管理。
 
 ## 使用
 
 该包不包含可执行节点，仅提供 URDF 和 Mesh 文件。被以下包引用：
 
 - `cr_robot_ros2/xtrainer.launch.py` — `robot_state_publisher` 加载 URDF 发布 TF
-- `moveit_test` — MoveIt 的 URDF/SRDF 配置入口 (`x_trainer.urdf.xacro`)
+- `xtrainer_moveit` — MoveIt 的 URDF/SRDF 配置入口 (`x_trainer.urdf.xacro`)
 - `xtrainer_task` — MoveItPy 加载机器人模型
 
 ## 加载方式

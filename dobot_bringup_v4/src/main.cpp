@@ -89,11 +89,17 @@ int main(int argc, char *argv[])
     {
         executor.spin();
     }
+    catch (const std::exception &ex)
+    {
+        RCLCPP_ERROR(robot->get_logger(), "executor stopped: %s", ex.what());
+    }
     catch (...)
     {
+        RCLCPP_ERROR(robot->get_logger(), "executor stopped");
     }
 
-    // 关闭 ROS 2 环境
+    // spin 返回后 TCP 还在, 先抱闸再拆连接。
+    robot->brakeOnExit();
     rclcpp::shutdown();
     return 0;
 }

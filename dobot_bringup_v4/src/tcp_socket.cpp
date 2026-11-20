@@ -44,12 +44,9 @@ void TcpClient::connect()
 
 void TcpClient::disConnect()
 {
-    if (is_connected_)
-    {
-        fd_ = -1;
-        is_connected_ = false;
-        ::close(fd_);
-    }
+    // 必须先 close 真实 fd。旧实现先把 fd_ 写成 -1 再 close, 等于 close(-1) 并把原 socket 泄漏掉,
+    // 随后重连会再占一条 Dashboard 连接。
+    close();
 }
 
 bool TcpClient::isConnect() const

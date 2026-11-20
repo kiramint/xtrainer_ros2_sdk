@@ -145,12 +145,17 @@
 #include <dobot_msgs_v4/srv/check_odd_mov_l.hpp>
 #include <dobot_msgs_v4/srv/check_odd_mov_j.hpp>
 #include <dobot_msgs_v4/srv/check_odd_mov_c.hpp>
+#include <atomic>
+#include <thread>
 
 class CRRobotRos2 : public rclcpp::Node
 {
 public:
     CRRobotRos2();
+    ~CRRobotRos2() override;
     void init();
+    // 进程退出时抱闸。可重复调用。
+    void brakeOnExit();
     static void execute_action(const std::shared_ptr<dobot_msgs_v4::srv::EnableRobot::Request> request,
                                std::shared_ptr<dobot_msgs_v4::srv::EnableRobot::Response> response);
     void goalHandle();
@@ -421,10 +426,18 @@ private:
 private:
     void getErrorID(std::vector<int> &Vec);
     void pubFeedBackInfo();
+    void autoEnableTask();
+    int readRobotMode() const;
+    int dashboardCommand(const std::string &cmd);
 
 private:
     std::shared_ptr<CRCommanderRos2> commander_;
     std::thread threadPubFeedBackInfo;
+    bool auto_enable_{true};
+    double auto_enable_timeout_sec_{60.0};
+    std::atomic<bool> shutting_down_{false};
+    std::atomic<bool> braked_{false};
+    std::thread auto_enable_thread_;
 };
 
 #endif // CRROBOTROS2_H

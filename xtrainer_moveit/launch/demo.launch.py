@@ -22,7 +22,7 @@ from moveit_configs_utils.launch_utils import DeclareBooleanLaunchArg
 
 
 def generate_launch_description():
-    moveit_config = MoveItConfigsBuilder("x_trainer", package_name="moveit_test").to_moveit_configs()
+    moveit_config = MoveItConfigsBuilder("x_trainer", package_name="xtrainer_moveit").to_moveit_configs()
     package_path = moveit_config.package_path
 
     ld = LaunchDescription()

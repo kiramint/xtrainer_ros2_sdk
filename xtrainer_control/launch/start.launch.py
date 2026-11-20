@@ -2,7 +2,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, TimerAction
+from launch.actions import IncludeLaunchDescription
 from launch_ros.actions import Node
 
 
@@ -322,24 +322,7 @@ def generate_launch_description():
         )
 
 
-    # ================================================================
-    # 使能机械臂 (延迟启动，等待驱动节点就绪)
-    # ================================================================
-    enable_arms = TimerAction(
-        period=3.0,  # 等待 3s 确保驱动节点 TCP 连接建立
-        actions=[
-            Node(
-                package="xtrainer_control",
-                executable="enable_arms",
-                name="enable_arms_startup",
-                output="screen",
-                parameters=[{
-                    "namespaces": ["Arm1", "Arm2"],
-                }],
-            ),
-        ],
-    )
-
+    # 抱闸由 cr_robot_ros2_node 处理: 控制器就绪后解锁, 进程退出时锁定。
     # ================================================================
     # LaunchDescription
     # ================================================================
@@ -356,7 +339,6 @@ def generate_launch_description():
             _make_pc_node("camera_top_435"),
             _make_pc_node("camera_left"),
             _make_pc_node("camera_right"),
-            enable_arms,
         ])
 
     return LaunchDescription(

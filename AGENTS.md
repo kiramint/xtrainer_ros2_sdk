@@ -1,6 +1,6 @@
 # AGENTS.md — XTrainer 项目记忆
 
-> 最后更新: 2026-08-02
+> 最后更新: 2026-11-20
 
 ---
 
@@ -111,7 +111,8 @@ XTrainer 是一个双臂机器人系统，使用 ROS2 Jazzy + Ubuntu24.04 进行
 3. `realsense_camera_top` + `realsense_camera_left` + `realsense_camera_right` (关闭 `pointcloud.enable`, 保留 decimation/spatial/temporal/hole_filling/align_depth)
 4. `camera_top_point_cloud_xyzrgb` + `camera_left_point_cloud_xyzrgb` + `camera_right_point_cloud_xyzrgb` (depth_image_proc, 消费 aligned_depth_to_color + color + camera_info, 发布 `/camera/<X>/depth/color/points` 在 color 坐标系)
 5. 按需加载 easy_handeye2 标定结果 (publish.launch.py)
-6. 延迟 3s 后自动使能双臂 (enable_arms)
+
+抱闸不在 `start.launch.py` 里做。`cr_robot_ros2_node` 启动后自己解锁 (PowerOn → EnableRobot), 进程退出时 DisableRobot 锁定。不要再把 `enable_arms` 加回这个 launch。
 
 ### 标定启动文件
 
@@ -170,7 +171,7 @@ dobot_bringup_v4 ──► /ArmX/joint_states_robot ──► xtrainer_joint_sta
                                                     └─► /joint_states (12 关节)
 ```
 
-### MoveIt 包 (`moveit_test`)
+### MoveIt 包 (`xtrainer_moveit`)
 
 | 文件 | 说明 |
 | ------ | ------ |
@@ -263,7 +264,7 @@ ros2 launch xtrainer_control start.launch.py
 ros2 action list | grep follow_joint_trajectory
 
 # 3. 启动 MoveIt
-ros2 launch moveit_test demo.launch.py
+ros2 launch xtrainer_moveit demo.launch.py
 ```
 
 ---
@@ -367,37 +368,16 @@ for i, (joint, tfs) in enumerate(points_with_time):
 
 ## 机械臂上电与使能
 
-### Dobot 协议要点
+### 谁负责抱闸
 
-- `PowerOn()` — 上电 (立即返回)，约需 **10 秒** 完成初始化
-- `EnableRobot()` — 使能 (必须在 PowerOn 完成、RobotMode ≥ 4 后调用)
-- `DisableRobot()` — 去使能
-- `StartDrag()` — 进入拖拽示教模式
-- `StopDrag()` — 退出拖拽示教模式
-- `RobotMode()` 返回值: 1=初始化, 2=抱闸松开, 3=未上电, 4=未使能, 5=使能空闲, 6=拖拽模式, 7=运行中, 9=报错
+`cr_robot_ros2_node` 在 Dashboard TCP 连上之后自己解锁, 进程退出 (Ctrl+C / launch 停掉) 时锁定。`start.launch.py` 不再调用 `enable_arms`。
 
-### 控制库 `robot_control.py`
-
-`xtrainer_control.robot_control` 模块提供以下函数：
-
-| 函数 | 说明 | 参数 |
+| 参数 | 默认 | 说明 |
 | ------ | ------ | ------ |
-| `enable_arm(node, ns)` | 单臂使能 (PowerOn→轮询RobotMode→EnableRobot)，已使能则跳过 | node, arm_namespace, timeout=30s |
-| `disable_arm(node, ns)` | 单臂去使能 (DisableRobot) | node, arm_namespace, timeout=10s |
-| `start_drag(node, ns)` | 单臂拖拽示教开 | node, arm_namespace, timeout=5s |
-| `stop_drag(node, ns)` | 单臂拖拽示教关 | node, arm_namespace, timeout=5s |
-| `enable_all(node, nss)` | 多臂使能，默认 `["Arm1","Arm2"]` | node, namespaces, timeout=10s |
-| `disable_all(node, nss)` | 多臂去使能 | node, namespaces, timeout=10s |
+| `auto_enable` | true | false 时启动不解锁。退出时仍然 DisableRobot |
+| `auto_enable_timeout` | 60.0 | 等控制器就绪的秒数。超时只打错误日志, 节点继续跑 |
 
-### 控制 launch 文件
-
-| 文件 | 功能 |
-| ------ | ------ |
-| `launch/enable.launch.py` | 一键使能双臂 |
-| `launch/disable.launch.py` | 一键去使能双臂 |
-| `launch/enable_and_drag.launch.py` | 一键使能+示教双臂 |
-
-### 手动调用示例
+手动脚本留给中途报警、或 `auto_enable:=false` 之后再使能:
 
 ```bash
 ros2 launch xtrainer_control enable.launch.py
@@ -405,6 +385,27 @@ ros2 launch xtrainer_control disable.launch.py
 ros2 run xtrainer_control enable_arms
 ros2 run xtrainer_control disable_arms
 ```
+
+### Dobot 协议要点
+
+- `PowerOn()` — 上电 (立即返回)，约需 **10 秒** 完成初始化。模式 1 时不要下发控制指令
+- `EnableRobot()` — 使能 / 解锁抱闸。只在 RobotMode = 4 时调用
+- `DisableRobot()` — 去使能 / 锁定抱闸
+- `BrakeControl(axis, 0)` — 仅当模式 2 (有关节抱闸被手动松开) 时, 先逐轴锁上, 再 EnableRobot。不要用它代替 EnableRobot
+- `StartDrag()` / `StopDrag()` — 拖拽示教。模式 6 时要先 StopDrag 再 DisableRobot
+- `RobotMode()`: 1=初始化, 2=有抱闸松开, 3=未上电, 4=未使能, 5=使能空闲, 6=拖拽, 7=运行, 8=点动, 9=报警, 10=暂停, 11=碰撞
+- 已解锁: 5/6/7/8/10。已抱闸: 3/4。0 表示还没有 1440 字节实时包
+
+### 控制库 `robot_control.py`
+
+`xtrainer_control.robot_control.RobotController` 的方法 (不是模块级函数):
+
+| 方法 | 说明 | 默认超时 |
+| ------ | ------ | ------ |
+| `enable_arm(ns)` | 按 RobotMode 重试 PowerOn / ClearError / BrakeControl / EnableRobot, 直到模式进入 5/6/7/8/10 | 90s |
+| `disable_arm(ns)` | 模式 6 先 StopDrag, 再 DisableRobot。模式 3/4 视为已经抱闸 | 10s |
+| `start_drag(ns)` / `stop_drag(ns)` | 拖拽示教开关 | 5s |
+| `enable_all(nss)` / `disable_all(nss)` | 默认 `["Arm1","Arm2"]`。enable 的 timeout 是每条臂各自的上限 | 90s / 10s |
 
 ---
 
@@ -434,10 +435,10 @@ ros2 run xtrainer_control disable_arms
 - [x] PowerOn 后通过 `RobotMode` 轮询等待（每秒查询，直到 mode ≥ 4 或 mode = 9 报错）
 - [x] enable 前先查 RobotMode，若 mode ≥ 5 则跳过（幂等）
 
-### `start.launch.py` — 自动使能
+### `start.launch.py` — 自动使能 (历史, 2026-11-20 已撤掉)
 
-- [x] 使用 `TimerAction(period=15.0)` 延迟 15s 后自动执行 `enable_arms`
-- [x] 确保驱动节点先启动、TCP 连接建立后再使能
+- [x] 当时使用 `TimerAction` 延迟后执行 `enable_arms`
+- 现行行为见文末「驱动内解锁/锁定抱闸」: 不要把 `enable_arms` 加回 `start.launch.py`
 
 ### `calibrate_top.launch.py` (上次会话)
 
@@ -463,7 +464,7 @@ ros2 run xtrainer_control disable_arms
 
 ## 本次会话修改记录 (MoveIt 控制调优, 2026-07-17)
 
-### `moveit_test` — 移除 ros2_control 冲突
+### `xtrainer_moveit` — 移除 ros2_control 冲突
 
 - [x] **根因**: `demo.launch.py` 调 `generate_demo_launch` 自动启动 `ros2_control_node`(mock_components/GenericSystem), 与 `xtrainer_bridge` 在同名 `/ArmX_controller/follow_joint_trajectory` 上创建 action server 冲突 → MoveIt 报 `unknown goal response` / `unknown result response`
 - [x] `config/x_trainer.urdf.xacro`: 移除 `<xacro:include x_trainer.ros2_control.xacro>` 及 `<ros2_control>` macro 调用
@@ -492,14 +493,14 @@ ros2 run xtrainer_control disable_arms
 - [x] `sleep(0.01)` 改为 `std::this_thread::sleep_for(std::chrono::milliseconds(1))`
 - [x] 影响 `doTcpCmd` 和 `doTcpCmd_f` 两处
 
-### `moveit_test` — joint_limits / pilz / URDF 限制对齐官方
+### `xtrainer_moveit` — joint_limits / pilz / URDF 限制对齐官方
 
 - [x] **根因**: URDF effort/velocity 是 SolidWorks 导出的 float32 最大值垃圾, MoveIt TOTG 读取后生成激进 bang-bang 时间参数 → 短 t → 控制器来不及平滑 → 卡顿
 - [x] `joint_limits.yaml`: `has_velocity_limits: true, max_velocity: 3.14, has_acceleration_limits: true, max_acceleration: 3.14` (让 TOTG 生成平滑梯形)
 - [x] `pilz_cartesian_limits.yaml`: 照官方降低 (trans_vel 1.0→0.5, trans_acc 2.25→1.0, trans_dec -5.0→-2.0, rot_vel 1.57→0.785)
 - [x] `x_trainer.urdf`: 角度限制照官方逐关节 (J1/J4/J5/J6=±6.28, J2=±3.14, J3=±2.79), effort/velocity 全清零
 
-### `moveit_test` — 新增 Ruckig 平滑 + 调整 scaling
+### `xtrainer_moveit` — 新增 Ruckig 平滑 + 调整 scaling
 
 - [x] **根因**: TOTG 生成 bang-bang 加速度 (瞬时 ±max), 加加速度(jerk)无穷大 → 控制器内部插补器追不上 → 卡顿
 - [x] 新建 `config/ompl_planning.yaml`: 在 TOTG 后加 `AddRuckigTrajectorySmoothing`, 把 bang-bang 转 jerk 有限 S 曲线
@@ -645,7 +646,7 @@ MoveItPy 是**进程内**规划库，与 move_group 是**平级替代**，不是
 - [x] `MoveItConfigsBuilder` 生成的 `planning_pipelines` 是 flat list `["ompl", ...]`，但 MoveItCpp 期望 nested dict `{pipeline_names: ["ompl", ...]}`
 - [x] 重写为只含 `planning_scene_monitor_options`、`plan_request_params`、`ompl_rrtc`、`pilz_ptp`，不再覆盖 `planning_pipelines` dict
 
-### `moveit_test/config/sensors_3d.yaml` — 禁用 octomap
+### `xtrainer_moveit/config/sensors_3d.yaml` — 禁用 octomap
 
 - [x] 旧版引用不存在的 kinect topic，导致 `No 3D sensor plugin(s) defined for octomap updates` 错误
 - [x] 改为 `sensors: []`
@@ -928,3 +929,35 @@ if robot_mode == 9:  # Error
 | --- | --- | --- |
 | 已挂 executor 的节点内调 `rclpy.spin_until_future_complete(node)` / `spin_once(node)` | node 被挂到 global + 常驻两个 executor 并发 spin, 高频回调双重分发 → 相机延迟骤增 | 判断 `node.executor`, 已挂载则只轮询 future; 或服务调用放独立线程+独立回调组 |
 | 服务调用每次 create_client 不 destroy | DDS 实体累积, 发现流量渐增 | 按 (类型, 服务名) 缓存 client 复用 |
+
+---
+
+## 本次会话修改记录 (驱动内解锁/锁定抱闸, 2026-11-20)
+
+`start.launch.py` 不再延迟调用 `enable_arms`。解锁和锁定跟 `cr_robot_ros2_node` 进程走。
+
+### `dobot_bringup_v4`
+
+- [x] `autoEnableTask`: 读实时 RobotMode, 经 Dashboard 直接发 `PowerOn` / `ClearError` / `BrakeControl(axis,0)` / `EnableRobot`。不走本节点的 ROS service (节点还没 spin 时自己调自己会卡住)
+- [x] 参数 `auto_enable` (默认 true)、`auto_enable_timeout` (默认 60s)。超时只报错, 不让节点退出
+- [x] `brakeOnExit`: 先停自动解锁线程, 模式 6 或模式未知时先 `StopDrag`, 再 `DisableRobot`。`main` 在 `spin` 返回后、`rclcpp::shutdown` 前调用; 析构再调一次, 第二次直接返回
+- [x] `auto_enable:=false` 时启动不解锁, 退出仍然抱闸
+- [x] `doTcpCmd` / `doTcpCmd_f` 最多等 5 秒。没有 `;` 就断开 Dashboard, 避免 `tcp_mutex_` 被占死, 退出时发不出 DisableRobot
+- [x] `TcpClient::disConnect` 改为关掉真实 fd。旧代码先把 fd 写成 -1 再 close, socket 泄漏
+- [x] `xtrainer.launch.py` 与 `dobot_bringup_ros2.launch.py` 传入 `auto_enable` / `auto_enable_timeout`
+
+### `enable_arms` 经常失败的原因
+
+- 驱动的 ROS service 在 Dashboard TCP 连上之前就存在。3 秒就调用时 `PowerOn` 直接抛异常, 脚本看到失败就退出, 不再重试
+- `PowerOn` 被控制器拒绝 (还在初始化) 后, 旧逻辑只干等模式 ≥ 4, 不会再发一次上电
+- 把 `EnableRobot` 的传输成功当成抱闸已松开, 不确认模式变成 5/6/7/8/10
+- `mode >= 5 且不是 9` 把碰撞 (11) 当成已经使能
+- Jazzy 的 `wait_for_service` 自己不 spin。脚本在 `__init__` 里干活、还没有 executor 时, 服务发现时好时坏
+- 旧 `enable_all` 默认超时 10 秒, 盖过单臂更长的等待; 上电本身就要约 10 秒
+
+### `xtrainer_control` — 手动使能仍保留
+
+- [x] `enable_arm` 改成和驱动同一套状态机, 默认 90 秒, 以实时模式进入 5/6/7/8/10 才算成功
+- [x] `enable_arms.py` 先挂上 executor 再调用服务, 不再在构造函数里 `sys.exit`
+- [x] 服务发现: 节点已有 executor 时只轮询 future; 没有 executor 时用 `spin_once` 推进发现
+- [x] `disable_arm` 在拖拽模式先 `StopDrag`

@@ -14,6 +14,7 @@
 | RealTime 数据竞态修复 | `recvTask` 改为先写入栈上 local buffer，再在 `mutex_` 下拷贝到 `real_time_data_`；`getRealData()` 返回值拷贝 (不再返回 shared_ptr) |
 | TCP 忙循环修复 | `tcpRecv(timeout=0)` 改为 `timeout=100ms`（select 阻塞），`sleep(0.01)` 改为 `sleep_for(1ms)` |
 | `joint_states_robot` 发布 | 50Hz wall_timer (独立 callback group)，角度为弧度（`command.cpp` 做 deg→rad 转换） |
+| 启动解锁 / 退出抱闸 | `auto_enable` 默认 true：控制器就绪后 PowerOn + EnableRobot。进程退出时 DisableRobot。见下文 |
 
 ## Launch 文件
 
@@ -52,6 +53,19 @@ IP 地址可通过环境变量覆写：
 ```bash
 ARM1_IP=192.168.1.10 ARM2_IP=192.168.1.11 ros2 launch cr_robot_ros2 xtrainer.launch.py
 ```
+
+### 抱闸
+
+驱动进程自己管抱闸，不依赖 `xtrainer_control` 的 `enable_arms`。
+
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `auto_enable` | `true` | 后台线程等到实时反馈里的 RobotMode 允许后，经 Dashboard 下发 PowerOn / EnableRobot。`false` 时启动不解锁 |
+| `auto_enable_timeout` | `60.0` | 等控制器就绪的秒数。超时只打错误日志，节点继续运行 |
+
+退出（Ctrl+C 或 launch 停掉该节点）时，无论 `auto_enable` 是什么，都会再发一次 `DisableRobot`。如果当时在拖拽模式，会先 `StopDrag`。
+
+`xtrainer.launch.py` 和 `dobot_bringup_ros2.launch.py` 已经把这两个参数传进去。中途报警后再使能，仍用 `ros2 launch xtrainer_control enable.launch.py`。
 
 ## Topics & Services
 
@@ -113,6 +127,12 @@ cr_robot_ros2_node (namespace /ArmX)
 │   │
 │   └── 默认 group (MutuallyExclusive):
 │       └── ~70 个其他服务 → doTcpCmd(tcp_mutex_ lock) → TCP Dashboard send+echo
+│
+├── autoEnableTask (auto_enable:=true 时)
+│   └── 读实时 RobotMode → Dashboard: ClearError / PowerOn / BrakeControl(axis,0) / EnableRobot
+│
+├── 进程退出 brakeOnExit
+│   └── 停掉 autoEnableTask → 必要时 StopDrag → DisableRobot
 │
 └── pubFeedBackInfo 线程 (独立后台线程, 100Hz)
     └── getRealData() → mutex_ 下值拷贝 RealTimeData → JSON → publish FeedInfo

@@ -1,4 +1,4 @@
-# moveit_test — XTrainer MoveIt 配置与启动
+# xtrainer_moveit — XTrainer MoveIt 配置与启动
 
 XTrainer 双臂机器人的 MoveIt2 配置包，包含 URDF 定义、运动学、规划管线、关节限制、控制器管理和整机启动文件。
 
@@ -72,13 +72,13 @@ ros2 action list | grep follow_joint_trajectory
 
 ```bash
 # 完整启动（move_group + RViz）
-ros2 launch moveit_test demo.launch.py
+ros2 launch xtrainer_moveit demo.launch.py
 
 # 仅启动 move_group（不含 RViz）
-ros2 launch moveit_test move_group.launch.py
+ros2 launch xtrainer_moveit move_group.launch.py
 
 # 不启动 RViz
-ros2 launch moveit_test demo.launch.py use_rviz:=false
+ros2 launch xtrainer_moveit demo.launch.py use_rviz:=false
 ```
 
 > [!CAUTION]
@@ -90,7 +90,7 @@ ros2 launch moveit_test demo.launch.py use_rviz:=false
 ## 架构
 
 ```
-move_group (moveit_test)
+move_group (xtrainer_moveit)
   ├── /Arm1_controller/follow_joint_trajectory (FollowJointTrajectory Action Client)
   └── /Arm2_controller/follow_joint_trajectory (FollowJointTrajectory Action Client)
          ↓
@@ -111,7 +111,7 @@ xtrainer_controller (xtrainer_bridge, 独立 node)
 ## 编译
 
 ```bash
-colcon build --packages-select moveit_test
+colcon build --packages-select xtrainer_moveit
 source install/setup.bash
 ```
 

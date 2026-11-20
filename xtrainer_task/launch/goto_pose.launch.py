@@ -11,7 +11,7 @@ from moveit_configs_utils import MoveItConfigsBuilder
 
 def generate_launch_description():
     moveit_config = (
-        MoveItConfigsBuilder("x_trainer", package_name="moveit_test")
+        MoveItConfigsBuilder("x_trainer", package_name="xtrainer_moveit")
         .moveit_cpp(
             file_path=get_package_share_directory("xtrainer_task")
             + "/config/moveit_cpp.yaml"

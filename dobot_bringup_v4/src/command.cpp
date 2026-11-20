@@ -120,6 +120,7 @@ void CRCommanderRos2::doTcpCmd(std::shared_ptr<TcpClient> &tcp, const char *cmd,
 {
     std::ignore = result;
     std::lock_guard<std::mutex> tcp_lock(tcp_mutex_);
+    err_id = -1;
     try
     {
         uint32_t has_read;
@@ -134,8 +135,17 @@ void CRCommanderRos2::doTcpCmd(std::shared_ptr<TcpClient> &tcp, const char *cmd,
 
         tcp->tcpSend(cmd, strlen(cmd));
         char *recv_ptr = buf;
+        const auto recv_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
         while (true)
         {
+            if (std::chrono::steady_clock::now() >= recv_deadline)
+            {
+                // 没有 ';' 就一直读会把 Dashboard 互斥锁占死, 后续 Enable/Disable 全部排队。
+                // 断开后由 recvTask 重连, 避免半包留在旧 socket 里污染下一条指令。
+                tcp->disConnect();
+                std::cout << "tcp cmd timeout: " << cmd << std::endl;
+                return;
+            }
             bool err = tcp->tcpRecv(recv_ptr, 1024, has_read, 100);
             if (!err)
             {
@@ -179,6 +189,7 @@ void CRCommanderRos2::doTcpCmd_f(std::shared_ptr<TcpClient> &tcp, const char *cm
 {
     std::ignore = result;
     std::lock_guard<std::mutex> tcp_lock(tcp_mutex_);
+    err_id = -1;
     try
     {
         uint32_t has_read;
@@ -192,8 +203,15 @@ void CRCommanderRos2::doTcpCmd_f(std::shared_ptr<TcpClient> &tcp, const char *cm
 #endif
         tcp->tcpSend(cmd, strlen(cmd));
         char *recv_ptr = buf;
+        const auto recv_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
         while (true)
         {
+            if (std::chrono::steady_clock::now() >= recv_deadline)
+            {
+                tcp->disConnect();
+                std::cout << "tcp cmd timeout: " << cmd << std::endl;
+                return;
+            }
             bool err = tcp->tcpRecv(recv_ptr, 1024, has_read, 100);
             if (!err)
             {
@@ -310,7 +328,8 @@ bool CRCommanderRos2::isConnected() const
 
 uint16_t CRCommanderRos2::getRobotMode() const
 {
-    return real_time_data_->robot_mode;
+    std::lock_guard<std::mutex> lock(mutex_);
+    return static_cast<uint16_t>(real_time_data_->robot_mode);
 }
 
 RealTimeData CRCommanderRos2::getRealData() const

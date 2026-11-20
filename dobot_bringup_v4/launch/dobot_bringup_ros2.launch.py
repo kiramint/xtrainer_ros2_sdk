@@ -30,6 +30,8 @@ dobot_ros2_params = [
     {"trajectory_duration": trajectory_duration},
     {"robot_node_name": robot_node_name},
     {"joint_names": joint_names},
+    {"auto_enable": True},
+    {"auto_enable_timeout": 60.0},
 ]
 
 
