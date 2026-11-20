@@ -1,0 +1,1545 @@
+## User
+
+这是一个机器人sdk，帮我抓取蓝色方块放到蓝色盒子中。顶部相机的校准文件不准，请勿使用。文件夹下有个mcp服务可以调用
+
+## Assistant
+
+顶部相机标定不可用。我先看项目里的 MCP 服务提供了哪些相机、夹爪和运动接口，再只用左右手相机来抓蓝色方块并放进蓝色盒子。
+
+## Tools
+
+- Search Tools: xtrainer mcp robot camera gripper move
+- Search: mcp|tool
+- List: .
+- List: xtrainer_mcp/xtrainer_mcp
+- Read: /opt/Project/dobot_ros2_sdk/xtrainer_mcp/README.md
+- Read: /opt/Project/dobot_ros2_sdk/xtrainer_mcp/xtrainer_mcp/server.py (1-200)
+- Search: def |@mcp|tool\(
+- Execute: ps aux | grep -E 'ros2|xtrainer|move_group|realsense|gripper' | grep -v grep | head -80; echo '---'; echo "ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-unset}"; ls /tmp 2>/dev/null | head -5 (Check if robot ROS stack is running)
+- Read: /opt/Project/dobot_ros2_sdk/xtrainer_mcp/xtrainer_mcp/server.py (191-236)
+- Read: /opt/Project/dobot_ros2_sdk/xtrainer_mcp/launch/bringup.launch.py (1-64)
+- Search: gripper_tip|approach|quaternion|orientation
+- Search: protocolVersion|initialize
+- Execute: tr '\0' '\n' < /proc/3124815/environ | grep -E 'ROS_|PYTHON|PATH|CONDA|LD_LIBRARY' | head -40; echo '---DOMAIN of move_group---'; tr '\0' '\n' < /proc/3124845/environ | grep -E 'ROS_DOMAIN|RMW_' (Read ROS env from running bringup)
+- Search: Content-Length|stdio
+- Search: DEFAULT_NEGOTIATED_VERSION|SUPPORTED_PROTOCOL
+- Read: /opt/Project/dobot_ros2_sdk/xtrainer_mcp/.vendor/mcp/server/stdio.py (1-180)
+- Search: class Client|def call_tool|stdio_client
+- Read: /opt/Project/dobot_ros2_sdk/xtrainer_mcp/.vendor/mcp/client/__init__.py (1-45)
+- Search: async def call_tool|class ClientSession|async def initialize
+- Read: /opt/Project/dobot_ros2_sdk/xtrainer_mcp/.vendor/mcp/client/session.py (981-1070)
+- Read: /opt/Project/dobot_ros2_sdk/xtrainer_mcp/.vendor/mcp/client/stdio/__init__.py
+- Read: /opt/Project/dobot_ros2_sdk/xtrainer_mcp/.vendor/mcp/client/client.py (2-121)
+- Read: /opt/Project/dobot_ros2_sdk/xtrainer_mcp/.vendor/mcp/client/stdio.py (1-100)
+- Search: def __init__|StdioServerParameters|server:
+- Read: /opt/Project/dobot_ros2_sdk/xtrainer_mcp/.vendor/mcp/client/stdio.py (95-174)
+- Read: /opt/Project/dobot_ros2_sdk/xtrainer_mcp/.vendor/mcp/client/client.py (251-430)
+- Read: /opt/Project/dobot_ros2_sdk/xtrainer_mcp/setup.py
+- Read: /opt/Project/dobot_ros2_sdk/xtrainer_mcp/xtrainer_mcp/cameras.py (131-250)
+- Search: camera_top|handeye|publish
+- Search: gripper_tcp|gripper_tip|camera_left|camera_right
+- Read: /opt/Project/dobot_ros2_sdk/xtrainer_mcp/xtrainer_mcp/cameras.py (1-40)
+- Read: /opt/Project/dobot_ros2_sdk/xtrainer_description/urdf/x_trainer.urdf (56-95)
+- Read: /opt/Project/dobot_ros2_sdk/xtrainer_control/launch/start.launch.py (251-340)
+- Read: /opt/Project/dobot_ros2_sdk/xtrainer_mcp/.vendor/mcp/client/client.py (721-840)
+- Search: CAMERAS|OPTICAL
+- Read: /opt/Project/dobot_ros2_sdk/install/xtrainer_mcp/lib/xtrainer_mcp/xtrainer_mcp (1-20)
+- Read: /opt/Project/dobot_ros2_sdk/xtrainer_mcp/xtrainer_mcp/motion.py (401-480)
+- Read: /opt/Project/dobot_ros2_sdk/xtrainer_mcp/xtrainer_mcp/geometry.py (108-162)
+- Read: /home/dell211/.grok/bundled/skills/long-running-background-tasks/SKILL.md
+- Search: camera_left|camera_right|camera_top
+
+## Assistant
+
+机器人和 MoveIt 已经在跑。我先接上工作区里的 MCP，只用左右手腕相机看场景，不用头顶相机的标定。
+
+## Tools
+
+- Edit: /tmp/xtrainer_mcp_bridge.py
+- Edit: /tmp/xtrainer_mcp_call.sh
+- Execute: source /opt/ros/jazzy/setup.bash && source /opt/Project/dobot_ros2_sdk/install/setup.bash && export ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET && rm -f /tmp/xtrainer_mcp_bridge.ready /tmp/xtrainer_mcp_bridge.sock && /usr/bin/python3 /tmp/xtrainer_mcp_bridge.py > /tmp/xtrainer_mcp_bridge.log 2>&1 (Start persistent xtrainer MCP bridge)
+- Read: /opt/ros/jazzy/setup.bash (1-12)
+- Execute: echo "SHELL=$SHELL"; echo "AMENT=$AMENT_PREFIX_PATH"; echo "COLCON=$COLCON_PREFIX_PATH"; ls /opt/ros/jazzy/setup.bash /opt/Project/dobot_ros2_sdk/install/setup.bash (Inspect current ROS environment paths)
+- Execute: bash -lc 'source /opt/ros/jazzy/setup.bash && source /opt/Project/dobot_ros2_sdk/install/setup.bash && export ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET && rm -f /tmp/xtrainer_mcp_bridge.ready /tmp/xtrainer_mcp_bridge.sock && exec /usr/bin/python3 /tmp/xtrainer_mcp_bridge.py' > /tmp/xtrainer_mcp_bridge.log 2>&1 (Start MCP bridge under bash ROS env)
+- Read: /tmp/xtrainer_mcp_bridge.log
+- Execute: ps aux | grep -E 'xtrainer_mcp_bridge|xtrainer_mcp' | grep -v grep; ls -l /tmp/xtrainer_mcp_bridge.sock /tmp/xtrainer_mcp_bridge.ready 2>&1 | head (See if MCP bridge process is up)
+
+## Assistant
+
+MCP 进程一启动就崩了。我先看运动客户端是怎么创建的，修好之后才能抓取。
+
+## Tools
+
+- Read: /opt/Project/dobot_ros2_sdk/xtrainer_mcp/xtrainer_mcp/motion.py (71-150)
+- Read: /opt/Project/dobot_ros2_sdk/xtrainer_mcp/xtrainer_mcp/node.py (91-140)
+- Read: /opt/ros/jazzy/lib/python3.12/site-packages/rclpy/node.py (1651-1720)
+- Search: self\._clients
+- Execute: ls -l /opt/Project/dobot_ros2_sdk/build/xtrainer_mcp/xtrainer_mcp/node.py /opt/Project/dobot_ros2_sdk/install/xtrainer_mcp/lib/python3.12/site-packages/xtrainer_mcp/node.py; stat -c '%i %n' /opt/Project/dobot_ros2_sdk/xtrainer_mcp/xtrainer_mcp/node.py /opt/Project/dobot_ros2_sdk/build/xtrainer_mcp/xtrainer_mcp/node.py (Check if MCP node.py is symlinked to source)
+- Search: _clients
+- Edit: /opt/Project/dobot_ros2_sdk/xtrainer_mcp/xtrainer_mcp/node.py
+- Read: /opt/Project/dobot_ros2_sdk/xtrainer_control/xtrainer_control/robot_control.py (1-80)
+- Search: def __init__
+- Execute: bash -lc 'source /opt/ros/jazzy/setup.bash && source /opt/Project/dobot_ros2_sdk/install/setup.bash && export ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET && rm -f /tmp/xtrainer_mcp_bridge.ready /tmp/xtrainer_mcp_bridge.sock && exec /usr/bin/python3 /tmp/xtrainer_mcp_bridge.py' > /tmp/xtrainer_mcp_bridge.log 2>&1 (Restart MCP bridge after callback-group fix)
+- Execute: for i in 1 2 3 4 5 6 7 8 9 10; do if [ -f /tmp/xtrainer_mcp_bridge.ready ]; then echo READY; cat /tmp/xtrainer_mcp_bridge.ready; break; fi; sleep 1; done; echo '--- log tail ---'; tail -30 /tmp/xtrainer_mcp_bridge.log (Wait until MCP bridge reports ready)
+- Execute: chmod +x /tmp/xtrainer_mcp_call.sh
+echo '=== STATUS ==='
+/tmp/xtrainer_mcp_call.sh get_status '{}' 30
+echo '=== GRIPPER ==='
+/tmp/xtrainer_mcp_call.sh gripper_get_state '{"side":"both"}' 20
+echo '=== MODE ==='
+/tmp/xtrainer_mcp_call.sh get_robot_mode '{"arm":"both"}' 20 (Query robot status, grippers, and mode)
+- Execute: echo '=== LEFT ==='
+/tmp/xtrainer_mcp_call.sh get_camera_frame '{"camera":"camera_left"}' 30
+echo '=== RIGHT ==='
+/tmp/xtrainer_mcp_call.sh get_camera_frame '{"camera":"camera_right"}' 30
+ls -l /tmp/xtrainer_view/ (Capture left and right wrist camera frames)
+- Read: /tmp/xtrainer_view/camera_right_color.jpg
+- Read: /tmp/xtrainer_view/camera_left_color.jpg
+- Execute: /usr/bin/python3 << 'PY'
+import cv2, numpy as np
+for name in ("camera_left", "camera_right"):
+    img = cv2.imread(f"/tmp/xtrainer_view/{name}_color.jpg")
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    # blue
+    mask = cv2.inRange(hsv, (90, 60, 40), (135, 255, 255))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5,5), np.uint8))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((9,9), np.uint8))
+    cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    print(f"\n== {name} blue ==")
+    items = []
+    for c in cnts:
+        a = cv2.contourArea(c)
+        if a < 400:
+            continue
+        x,y,w,h = cv2.boundingRect(c)
+        M = cv2.moments(c)
+        if M["m00"] == 0:
+            continue
+        cx, cy = int(M["m10"]/M["m00"]), int(M["m01"]/M["m00"])
+        items.append((a, cx, cy, x, y, w, h))
+    for a,cx,cy,x,y,w,h in sorted(items, reverse=True)[:8]:
+        print(f"  area={a:.0f} centroid=({cx},{cy}) bbox=({x},{y},{w},{h})")
+    # teal / cyan tray
+    tmask = cv2.inRange(hsv, (70, 40, 40), (100, 255, 255))
+    tmask = cv2.morphologyEx(tmask, cv2.MORPH_OPEN, np.ones((5,5), np.uint8))
+    cnts, _ = cv2.findContours(tmask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    print(f"== {name} teal ==")
+    items=[]
+    for c in cnts:
+        a = cv2.contourArea(c)
+        if a < 800:
+            continue
+        x,y,w,h = cv2.boundingRect(c)
+        M = cv2.moments(c)
+        if M["m00"]==0: continue
+        cx, cy = int(M["m10"]/M["m00"]), int(M["m01"]/M["m00"])
+        items.append((a,cx,cy,x,y,w,h))
+    for a,cx,cy,x,y,w,h in sorted(items, reverse=True)[:6]:
+        print(f"  area={a:.0f} centroid=({cx},{cy}) bbox=({x},{y},{w},{h})")
+PY (Locate blue and teal objects in wrist images)
+- Execute: /usr/bin/python3 << 'PY'
+import cv2
+import numpy as np
+pts = {
+ "left_block": ("camera_left", 705, 157),
+ "left_tray": ("camera_left", 1100, 180),
+ "right_block": ("camera_right", 80, 167),
+ "right_tray": ("camera_right", 500, 200),
+ "right_far": ("camera_right", 1146, 303),
+}
+for name,(cam,u,v) in pts.items():
+    img = cv2.imread(f"/tmp/xtrainer_view/{cam}_color.jpg")
+    bgr = img[v,u]
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)[v,u]
+    print(f"{name:12} px=({u},{v}) BGR={bgr.tolist()} HSV={hsv.tolist()}")
+
+# tighter blue: H 100-125, S>100, and not too cyan (H>95). Cyan tray often H 80-100.
+print("\n-- tighter blue blobs --")
+for cam in ("camera_left","camera_right"):
+    img = cv2.imread(f"/tmp/xtrainer_view/{cam}_color.jpg")
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, (100, 90, 50), (125, 255, 255))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5,5),np.uint8))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((7,7),np.uint8))
+    cnts,_ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    print(cam)
+    for c in sorted(cnts, key=cv2.contourArea, reverse=True)[:6]:
+        a=cv2.contourArea(c)
+        if a<300: continue
+        x,y,w,h=cv2.boundingRect(c)
+        M=cv2.moments(c)
+        cx,cy=int(M["m10"]/M["m00"]), int(M["m01"]/M["m00"])
+        print(f"  area={a:.0f} c=({cx},{cy}) bbox=({x},{y},{w}x{h}) aspect={w/h:.2f}")
+PY (Sample HSV and separate blue blocks from tray)
+- Execute: /usr/bin/python3 << 'PY'
+import cv2
+left = cv2.imread("/tmp/xtrainer_view/camera_left_color.jpg")
+right = cv2.imread("/tmp/xtrainer_view/camera_right_color.jpg")
+cv2.imwrite("/tmp/xtrainer_view/left_block.jpg", left[0:340, 620:780])
+cv2.imwrite("/tmp/xtrainer_view/right_far.jpg", right[220:400, 980:1280])
+cv2.imwrite("/tmp/xtrainer_view/right_leftedge.jpg", right[0:340, 0:220])
+cv2.imwrite("/tmp/xtrainer_view/right_tray.jpg", right[0:450, 220:750])
+print("crops saved", left.shape, right.shape)
+PY
+python3 - << 'PY'
+import json, socket
+calls = [
+ ("camera_left", 705, 40),
+ ("camera_left", 705, 157),
+ ("camera_left", 705, 300),
+ ("camera_left", 680, 157),
+ ("camera_left", 740, 157),
+ ("camera_right", 1143, 309),
+ ("camera_right", 1060, 270),
+ ("camera_right", 1240, 270),
+ ("camera_right", 1060, 350),
+ ("camera_right", 1240, 350),
+ ("camera_right", 80, 160),
+ ("camera_right", 500, 200),
+ ("camera_left", 1000, 200),
+]
+for cam,u,v in calls:
+    req = {"tool":"project_pixel","arguments":{"camera":cam,"u":u,"v":v,"window":7},"timeout":20}
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(30)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf+=c
+    s.close()
+    print(f"{cam} ({u},{v}) -> {buf.decode().strip()}")
+PY (Crop objects and project key pixels to base_link)
+- Read: /tmp/xtrainer_view/left_block.jpg
+- Read: /tmp/xtrainer_view/right_far.jpg
+- Read: /tmp/xtrainer_view/right_tray.jpg
+- Execute: /tmp/xtrainer_mcp_call.sh get_camera_frame '{"camera":"camera_top"}' 30
+ls -l /tmp/xtrainer_view/camera_top_color.jpg (Grab top camera image for scene layout only)
+- Read: /tmp/xtrainer_view/camera_top_color.jpg
+- Execute: /usr/bin/python3 << 'PY'
+import cv2
+img = cv2.imread("/tmp/xtrainer_view/camera_top_color.jpg")
+h,w = img.shape[:2]
+print(h,w)
+# 2x2 tiles plus a center strip
+tiles = {
+ "tl": img[0:h//2, 0:w//2],
+ "tr": img[0:h//2, w//2:],
+ "bl": img[h//2:, 0:w//2],
+ "br": img[h//2:, w//2:],
+}
+for k,t in tiles.items():
+    cv2.imwrite(f"/tmp/xtrainer_view/top_{k}.jpg", t)
+    print(k, t.shape)
+# also blue mask overlay small
+hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+mask = cv2.inRange(hsv, (98, 80, 40), (125, 255, 255))
+cnts,_ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+print("blue blobs")
+for c in sorted(cnts, key=cv2.contourArea, reverse=True)[:10]:
+    a=cv2.contourArea(c)
+    if a<200: continue
+    x,y,bw,bh=cv2.boundingRect(c)
+    M=cv2.moments(c)
+    cx,cy=int(M["m10"]/M["m00"]), int(M["m01"]/M["m00"])
+    print(f"  area={a:.0f} c=({cx},{cy}) bbox=({x},{y},{bw}x{bh})")
+PY (Tile top view and list blue blobs)
+- Execute: /usr/bin/python3 << 'PY'
+import cv2
+img = cv2.imread("/tmp/xtrainer_view/camera_top_color.jpg")
+crops = {
+ "big": (450, 360, 820, 580),
+ "square_tr": (760, 40, 980, 240),
+ "tall": (250, 300, 420, 560),
+ "smallsq": (700, 340, 860, 480),
+ "leftedge": (0, 340, 160, 500),
+}
+for name,(x0,y0,x1,y1) in crops.items():
+    cv2.imwrite(f"/tmp/xtrainer_view/topcrop_{name}.jpg", img[y0:y1, x0:x1])
+    print(name, "saved")
+PY (Crop candidate cube and box from top view)
+- Read: /tmp/xtrainer_view/topcrop_tall.jpg
+- Read: /tmp/xtrainer_view/topcrop_big.jpg
+- Read: /tmp/xtrainer_view/topcrop_square_tr.jpg
+- Read: /tmp/xtrainer_view/topcrop_smallsq.jpg
+- Execute: bash -lc 'source /opt/ros/jazzy/setup.bash && source /opt/Project/dobot_ros2_sdk/install/setup.bash && export ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET && python3 - << "PY"
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from sensor_msgs.msg import Image
+from cv_bridge import CvBridge
+import cv2
+rclpy.init()
+node = Node("grab435")
+bridge = CvBridge()
+qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, history=HistoryPolicy.KEEP_LAST, depth=1)
+got = {}
+def cb(msg):
+    if "img" not in got:
+        got["img"] = bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
+node.create_subscription(Image, "/camera/camera_top_435/color/image_raw", cb, qos)
+for _ in range(50):
+    rclpy.spin_once(node, timeout_sec=0.1)
+    if "img" in got:
+        break
+if "img" not in got:
+    print("NO FRAME")
+else:
+    img = got["img"]
+    cv2.imwrite("/tmp/xtrainer_view/top435_color.jpg", img)
+    print("saved", img.shape)
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, (98, 90, 40), (130, 255, 255))
+    cnts,_ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    for c in sorted(cnts, key=cv2.contourArea, reverse=True)[:8]:
+        a=cv2.contourArea(c)
+        if a<400: continue
+        x,y,w,h=cv2.boundingRect(c)
+        M=cv2.moments(c)
+        cx,cy=int(M["m10"]/M["m00"]), int(M["m01"]/M["m00"])
+        print(f"blue area={a:.0f} c=({cx},{cy}) bbox=({x},{y},{w}x{h})")
+node.destroy_node(); rclpy.shutdown()
+PY' (Capture camera_top_435 color for layout only)
+- Execute: for spec in \
+  'camera_left 0 0 0' \
+  'camera_left 0 0 0.3' \
+  'camera_right 0 0 0' \
+  'camera_right 0 0 0.3' \
+  'camera_left 0.05 0 0.3' \
+  'camera_right -0.05 0 0.3'
+ do
+  set -- $spec
+  echo -n "$1 ($2,$3,$4) "
+  /tmp/xtrainer_mcp_call.sh transform_optical_point "{\"camera\":\"$1\",\"x\":$2,\"y\":$3,\"z\":$4}" 15
+ done
+echo '=== TIP ==='
+/tmp/xtrainer_mcp_call.sh get_tcp_pose '{"arm":"Arm1","link":"tip"}' 20
+/tmp/xtrainer_mcp_call.sh get_tcp_pose '{"arm":"Arm2","link":"tip"}' 20 (Locate wrist cameras and gripper tips in base_link)
+- Read: /tmp/xtrainer_view/top_tr.jpg
+- Read: /tmp/xtrainer_view/top_tl.jpg
+
+## User
+
+青色盒子符合要求
+
+## Assistant
+
+青色盒子可以作为目标。我用左右手腕相机定位蓝色方块和这个盒子，不用头顶相机的标定。
+
+## Tools
+
+- Execute: /usr/bin/python3 << 'PY'
+import cv2, numpy as np, json, socket
+
+def call(tool, args, timeout=25):
+    req = {"tool": tool, "arguments": args, "timeout": timeout}
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout+10)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf += c
+    s.close()
+    return json.loads(buf.decode())
+
+img = cv2.imread("/tmp/xtrainer_view/camera_left_color.jpg")
+hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+mask = cv2.inRange(hsv, (98, 100, 40), (125, 255, 255))
+mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3,3),np.uint8))
+# restrict to the tall bar, not the tray: u 620-800
+band = np.zeros_like(mask)
+band[:, 620:800] = mask[:, 620:800]
+ys, xs = np.where(band>0)
+print("left bar pixels", len(xs), "u", xs.min(), xs.max(), "v", ys.min(), ys.max())
+# row profile to find seam (dark gap)
+for v in range(0, 360, 15):
+    row = band[v, 640:780]
+    print(f"  v={v:3d} blue_cols={int(row.sum()/255)}")
+
+# tray on right image
+rimg = cv2.imread("/tmp/xtrainer_view/camera_right_color.jpg")
+rhsv = cv2.cvtColor(rimg, cv2.COLOR_BGR2HSV)
+tmask = cv2.inRange(rhsv, (80, 50, 40), (100, 255, 255))
+tmask = cv2.morphologyEx(tmask, cv2.MORPH_OPEN, np.ones((5,5),np.uint8))
+# exclude edges
+tmask[:, :200] = 0
+tmask[:, 950:] = 0
+ys, xs = np.where(tmask>0)
+print("tray pixels", len(xs), "u", int(xs.min()), int(xs.max()), "v", int(ys.min()), int(ys.max()))
+# sample a few interior points: median u,v and corners of bbox shrunk
+u0,u1 = int(np.percentile(xs, 20)), int(np.percentile(xs, 80))
+v0,v1 = int(np.percentile(ys, 20)), int(np.percentile(ys, 80))
+cu, cv = int(np.median(xs)), int(np.median(ys))
+print("tray inner box", u0, v0, u1, v1, "center", cu, cv)
+
+pts = []
+# bar samples along center u=705
+for v in (20, 80, 140, 200, 260, 320):
+    pts.append(("camera_left", 705, v, f"bar{v}"))
+# table beside bar
+for u,v in ((600, 180), (780, 180), (620, 300)):
+    pts.append(("camera_left", u, v, f"table{u}_{v}"))
+# tray grid
+for u,v in ((cu, cv), (u0, v0), (u1, v0), (u0, v1), (u1, v1), ((u0+u1)//2, v0), ((u0+u1)//2, v1)):
+    pts.append(("camera_right", u, v, f"tray{u}_{v}"))
+
+for cam,u,v,name in pts:
+    r = call("project_pixel", {"camera": cam, "u": u, "v": v, "window": 5})
+    if r.get("ok"):
+        print(f"{name:16} {cam} ({u},{v}) zbase={r['base_xyz']} depth={r['depth_mm']}")
+    else:
+        print(f"{name:16} FAIL {r.get('error')}")
+PY (Measure blue bar and cyan tray in base_link)
+- Read: /opt/Project/dobot_ros2_sdk/xtrainer_description/urdf/x_trainer.urdf (2-101)
+- Execute: /usr/bin/python3 << 'PY'
+import json, socket
+def call(tool, args, timeout=90):
+    req = {"tool": tool, "arguments": args, "timeout": timeout}
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout+20)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf += c
+    s.close()
+    return json.loads(buf.decode())
+
+print("TORQUE", call("gripper_set_torque", {"side":"left","limit":450}))
+pose = dict(arm="Arm1", x=0.402, y=-0.118, z=0.18,
+            qx=1.0, qy=0.0, qz=0.0, qw=0.0, link="tip", planner="pilz_lin")
+plan = call("plan_pose", pose, timeout=60)
+print("PLAN keys", {k: plan.get(k) for k in ("ok","error","plan_id","duration_sec","point_count","end_link","self_collision","end_pose")})
+if not plan.get("ok"):
+    print(json.dumps(plan, ensure_ascii=False)[:1500])
+else:
+    pid = plan["plan_id"]
+    chk = call("check_plan", {"plan_id": pid}, timeout=40)
+    print("CHECK", json.dumps({k: chk.get(k) for k in ("ok","collision","error")}, ensure_ascii=False)[:800])
+    # print a short collision summary
+    if isinstance(chk, dict):
+        print("CHECK_KEYS", list(chk.keys()))
+        for k,v in chk.items():
+            if k not in ("points",):
+                s=json.dumps(v, ensure_ascii=False)
+                if len(s)>400: s=s[:400]
+                print(f"  {k}: {s}")
+PY (Plan a straight approach above the blue block)
+- Execute: /usr/bin/python3 << 'PY'
+import json, socket
+def call(tool, args, timeout=90):
+    req = {"tool": tool, "arguments": args, "timeout": timeout}
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout+20)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf += c
+    s.close()
+    return json.loads(buf.decode())
+ex = call("execute_plan", {"plan_id":"p1"}, timeout=60)
+print("EXEC", json.dumps(ex, ensure_ascii=False)[:800])
+print("TIP", json.dumps(call("get_tcp_pose", {"arm":"Arm1","link":"tip"}), ensure_ascii=False)[:500])
+PY (Move left gripper above the blue block)
+- Execute: /tmp/xtrainer_mcp_call.sh get_camera_frame '{"camera":"camera_left"}' 20
+/usr/bin/python3 << 'PY'
+import cv2, numpy as np, json, socket
+img = cv2.imread("/tmp/xtrainer_view/camera_left_color.jpg")
+hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+mask = cv2.inRange(hsv, (98, 100, 40), (125, 255, 255))
+band = np.zeros_like(mask)
+band[:, 500:900] = mask[:, 500:900]
+ys, xs = np.where(band>0)
+print("bar u", xs.min(), xs.max(), "v", ys.min(), ys.max(), "n", len(xs))
+cu, cv = int(np.median(xs)), int(np.median(ys))
+print("median", cu, cv)
+# save a crop around the bar
+x0,x1 = max(0,xs.min()-40), min(img.shape[1], xs.max()+40)
+y0,y1 = max(0,ys.min()-10), min(img.shape[0], ys.max()+40)
+cv2.imwrite("/tmp/xtrainer_view/bar_now.jpg", img[y0:y1, x0:x1])
+print("crop", x0,y0,x1,y1)
+def call(tool, args, timeout=20):
+    req = {"tool": tool, "arguments": args, "timeout": timeout}
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout+10)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf += c
+    s.close()
+    return json.loads(buf.decode())
+for name,u,v in (("center",cu,cv),("top",cu,int(ys.min()+5)),("bot",cu,int(ys.max()-5)),
+                 ("left",int(xs.min()+3),cv),("right",int(xs.max()-3),cv)):
+    r = call("project_pixel", {"camera":"camera_left","u":u,"v":v,"window":5})
+    print(name, (u,v), r.get("base_xyz"), r.get("depth_mm"), r.get("error"))
+PY (Recenter the blue block in the left camera)
+- Read: /tmp/xtrainer_view/bar_now.jpg
+- Execute: /usr/bin/python3 << 'PY'
+import json, socket
+def call(tool, args, timeout=60):
+    req = {"tool": tool, "arguments": args, "timeout": timeout}
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout+15)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf += c
+    s.close()
+    return json.loads(buf.decode())
+plan = call("plan_pose", dict(arm="Arm1", x=0.402, y=-0.02, z=0.18,
+            qx=1.0, qy=0.0, qz=0.0, qw=0.0, link="tip", planner="pilz_lin"))
+print({k: plan.get(k) for k in ("ok","error","plan_id","duration_sec","self_collision")})
+if plan.get("ok") and plan.get("self_collision",{}).get("valid", True):
+    ex = call("execute_plan", {"plan_id": plan["plan_id"]}, timeout=40)
+    print("EXEC", ex.get("ok"), ex.get("error_code"), ex.get("error"))
+else:
+    print(json.dumps(plan, ensure_ascii=False)[:1000])
+PY (Shift left camera to see the full blue block)
+- Execute: /tmp/xtrainer_mcp_call.sh get_camera_frame '{"camera":"camera_left"}' 20
+/usr/bin/python3 << 'PY'
+import cv2, numpy as np, json, socket
+img = cv2.imread("/tmp/xtrainer_view/camera_left_color.jpg")
+hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+mask = cv2.inRange(hsv, (98, 110, 40), (120, 255, 255))
+band = np.zeros_like(mask); band[:,480:900]=mask[:,480:900]
+ys,xs=np.where(band>0)
+print("u",xs.min(),xs.max(),"v",ys.min(),ys.max(),"n",len(xs), "img", img.shape)
+cu,cv=int(np.median(xs)), int(np.median(ys))
+print("median",cu,cv)
+x0,x1=max(0,int(xs.min())-30), min(1279,int(xs.max())+30)
+y0,y1=max(0,int(ys.min())-10), min(719,int(ys.max())+20)
+cv2.imwrite("/tmp/xtrainer_view/bar_full.jpg", img[y0:y1, x0:x1])
+def call(tool, args, timeout=20):
+    req={"tool":tool,"arguments":args,"timeout":timeout}
+    s=socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.settimeout(30)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf+=c
+    s.close(); return json.loads(buf.decode())
+samples=[("c",cu,cv),("top",cu,max(2,int(ys.min())+4)),("bot",cu,min(717,int(ys.max())-4)),
+         ("L",int(xs.min())+4,cv),("R",int(xs.max())-4,cv)]
+# also a few along length
+for v in np.linspace(max(2,ys.min()+4), min(717,ys.max()-4), 6):
+    samples.append((f"v{int(v)}", cu, int(v)))
+for name,u,v in samples:
+    r=call("project_pixel",{"camera":"camera_left","u":int(u),"v":int(v),"window":5})
+    print(f"{name:6} ({u},{v}) {r.get('base_xyz')} d={r.get('depth_mm')} {r.get('error','')}")
+PY (Measure the full blue block after the shift)
+- Read: /tmp/xtrainer_view/bar_full.jpg
+- Execute: /usr/bin/python3 << 'PY'
+import json, socket
+def call(tool, args, timeout=60):
+    req = {"tool": tool, "arguments": args, "timeout": timeout}
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout+15)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf += c
+    s.close()
+    return json.loads(buf.decode())
+plan = call("plan_pose", dict(arm="Arm1", x=0.397, y=-0.120, z=0.16,
+            qx=1.0, qy=0.0, qz=0.0, qw=0.0, link="tip", planner="pilz_lin"))
+print("PLAN", plan.get("ok"), plan.get("plan_id"), plan.get("error"), plan.get("self_collision",{}).get("valid"), plan.get("duration_sec"))
+if plan.get("ok") and plan.get("self_collision",{}).get("valid"):
+    ex = call("execute_plan", {"plan_id": plan["plan_id"]}, timeout=40)
+    print("EXEC", ex.get("ok"), ex.get("error_code"), ex.get("error"))
+    print("TIP", call("get_tcp_pose", {"arm":"Arm1","link":"tip"})["pose"]["position"])
+PY (Center left tip over the blue block)
+- Execute: /usr/bin/python3 << 'PY'
+import json, socket
+def call(tool, args, timeout=60):
+    req = {"tool": tool, "arguments": args, "timeout": timeout}
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout+15)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf += c
+    s.close()
+    return json.loads(buf.decode())
+plan = call("plan_pose", dict(arm="Arm1", x=0.397, y=-0.120, z=0.052,
+            qx=1.0, qy=0.0, qz=0.0, qw=0.0, link="tip", planner="pilz_lin"))
+print("PLAN", plan.get("ok"), plan.get("plan_id"), plan.get("error"), plan.get("self_collision",{}).get("valid"), plan.get("duration_sec"))
+if not plan.get("ok"):
+    print(json.dumps(plan, ensure_ascii=False)[:1200])
+elif plan.get("self_collision",{}).get("valid"):
+    ex = call("execute_plan", {"plan_id": plan["plan_id"]}, timeout=40)
+    print("EXEC", ex.get("ok"), ex.get("error_code"), ex.get("error"))
+    print("TIP", call("get_tcp_pose", {"arm":"Arm1","link":"tip"})["pose"]["position"])
+    print("MODE", call("get_robot_mode", {"arm":"Arm1"}))
+PY (Lower the left gripper onto the blue block)
+- Execute: /usr/bin/python3 << 'PY'
+import json, socket, time
+def call(tool, args, timeout=30):
+    req = {"tool": tool, "arguments": args, "timeout": timeout}
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout+10)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf += c
+    s.close()
+    return json.loads(buf.decode())
+for i in range(8):
+    m = call("get_robot_mode", {"arm":"Arm1"})
+    mode = m["arms"]["Arm1"]["mode"]
+    print("mode", mode, m["arms"]["Arm1"]["mode_name"])
+    if mode in (5,6,8,10):
+        break
+    time.sleep(0.4)
+print(call("get_camera_frame", {"camera":"camera_left"}).get("color_jpeg_path"))
+PY (Wait until the arm is idle and grab a view)
+- Read: /tmp/xtrainer_view/camera_left_color.jpg
+- Execute: /usr/bin/python3 << 'PY'
+import json, socket, time
+def call(tool, args, timeout=30):
+    req = {"tool": tool, "arguments": args, "timeout": timeout}
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout+10)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf += c
+    s.close()
+    return json.loads(buf.decode())
+print("CLOSE", call("gripper_close", {"side":"left","speed":0.5}))
+time.sleep(1.2)
+print("STATE", json.dumps(call("gripper_get_state", {"side":"left"}), ensure_ascii=False))
+PY (Close the left gripper on the blue block)
+- Execute: /usr/bin/python3 << 'PY'
+import json, socket, time
+def call(tool, args, timeout=20):
+    req = {"tool": tool, "arguments": args, "timeout": timeout}
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(30)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf += c
+    s.close()
+    return json.loads(buf.decode())
+for i in range(6):
+    st = call("gripper_get_state", {"side":"left"})["gripper"]["left"]
+    print(i, st["status"], "pos", st["position"], "raw", st["raw_position"], "load", st["load"])
+    if st["status"] != "MOVING":
+        break
+    time.sleep(0.5)
+print(call("get_camera_frame", {"camera":"camera_left"})["color_jpeg_path"])
+PY (Wait for gripper to finish closing)
+- Read: /tmp/xtrainer_view/camera_left_color.jpg
+- Search: MOVING|CLOSED|status
+- Read: /opt/Project/dobot_ros2_sdk/xtrainer_gripper/xtrainer_gripper/gripper_node.py (191-230)
+- Execute: /usr/bin/python3 << 'PY'
+import json, socket
+def call(tool, args, timeout=60):
+    req = {"tool": tool, "arguments": args, "timeout": timeout}
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout+15)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf += c
+    s.close()
+    return json.loads(buf.decode())
+plan = call("plan_pose", dict(arm="Arm1", x=0.397, y=-0.120, z=0.22,
+            qx=1.0, qy=0.0, qz=0.0, qw=0.0, link="tip", planner="pilz_lin"))
+print("PLAN", plan.get("ok"), plan.get("plan_id"), plan.get("error"), plan.get("self_collision",{}).get("valid"))
+if plan.get("ok") and plan.get("self_collision",{}).get("valid"):
+    ex = call("execute_plan", {"plan_id": plan["plan_id"]}, timeout=40)
+    print("EXEC", ex.get("ok"), ex.get("error_code"), ex.get("error"))
+    print("TIP", call("get_tcp_pose", {"arm":"Arm1","link":"tip"})["pose"]["position"])
+PY (Lift the left gripper with the block)
+- Execute: /tmp/xtrainer_mcp_call.sh get_camera_frame '{"camera":"camera_left"}' 20
+/usr/bin/python3 - << 'PY'
+import json,socket
+def call(tool, args, timeout=15):
+    req={"tool":tool,"arguments":args,"timeout":timeout}
+    s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(25)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf+=c
+    s.close(); return json.loads(buf.decode())
+print(call("gripper_get_state",{"side":"left"}))
+# sample center pixel depth — if block is in the gripper, depth is small
+print(call("project_pixel",{"camera":"camera_left","u":640,"v":300,"window":7}))
+PY (Check whether the blue block lifted with the gripper)
+- Read: /tmp/xtrainer_view/camera_left_color.jpg
+
+## Assistant
+
+蓝色方块已经夹在左夹爪里。我先把右臂让开，再把它放进青色盒子。
+
+## Tools
+
+- Execute: /usr/bin/python3 << 'PY'
+import json, socket
+def call(tool, args, timeout=70):
+    req = {"tool": tool, "arguments": args, "timeout": timeout}
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout+20)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf += c
+    s.close()
+    return json.loads(buf.decode())
+print("ARM2", call("get_tcp_pose", {"arm":"Arm2","link":"tip"})["pose"]["position"])
+plan = call("plan_pose", dict(arm="Arm2", x=0.88, y=0.08, z=0.38,
+            qx=1.0, qy=0.0, qz=0.0, qw=0.0, link="tip", planner="ompl"), timeout=50)
+print("PLAN", plan.get("ok"), plan.get("plan_id"), plan.get("error"), plan.get("duration_sec"), plan.get("self_collision",{}).get("valid"))
+if not plan.get("ok"):
+    print(json.dumps({k:plan.get(k) for k in ("ok","error")}, ensure_ascii=False)[:800])
+elif plan.get("self_collision",{}).get("valid", True):
+    chk = call("check_plan", {"plan_id": plan["plan_id"]}, timeout=30)
+    print("CHECK", chk.get("valid"), "contacts", len(chk.get("contacts") or []))
+    if chk.get("valid"):
+        ex = call("execute_plan", {"plan_id": plan["plan_id"]}, timeout=60)
+        print("EXEC", ex.get("ok"), ex.get("error_code"), ex.get("error"))
+        print("ARM2NOW", call("get_tcp_pose", {"arm":"Arm2","link":"tip"})["pose"]["position"])
+PY (Move the right arm clear of the cyan tray)
+- Execute: /usr/bin/python3 << 'PY'
+import json, socket
+def call(tool, args, timeout=70):
+    req = {"tool": tool, "arguments": args, "timeout": timeout}
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout+20)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf += c
+    s.close()
+    return json.loads(buf.decode())
+plan = call("plan_pose", dict(arm="Arm1", x=0.64, y=-0.15, z=0.26,
+            qx=1.0, qy=0.0, qz=0.0, qw=0.0, link="tip", planner="ompl"), timeout=50)
+print("PLAN", plan.get("ok"), plan.get("plan_id"), plan.get("error"), plan.get("duration_sec"), plan.get("self_collision",{}).get("valid"))
+if plan.get("ok"):
+    chk = call("check_plan", {"plan_id": plan["plan_id"]}, timeout=30)
+    print("CHECK", chk.get("valid"), "contacts", len(chk.get("contacts") or []))
+    if chk.get("valid"):
+        ex = call("execute_plan", {"plan_id": plan["plan_id"]}, timeout=60)
+        print("EXEC", ex.get("ok"), ex.get("error_code"), ex.get("error"))
+        print("TIP", call("get_tcp_pose", {"arm":"Arm1","link":"tip"})["pose"]["position"])
+        print("GRIP", call("gripper_get_state", {"side":"left"})["gripper"]["left"])
+else:
+    print(str(plan)[:800])
+PY (Carry the blue block above the cyan tray)
+- Execute: /usr/bin/python3 << 'PY'
+import json, socket
+def call(tool, args, timeout=25):
+    req = {"tool": tool, "arguments": args, "timeout": timeout}
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout+10)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf += c
+    s.close()
+    return json.loads(buf.decode())
+
+candidates = []
+for x in (0.50, 0.54, 0.56, 0.58, 0.60, 0.62):
+    for z in (0.16, 0.20, 0.24):
+        candidates.append(("Arm1", x, -0.15, z))
+for x in (0.50, 0.55, 0.58, 0.62, 0.66):
+    for z in (0.16, 0.22):
+        candidates.append(("Arm2", x, -0.15, z))
+for arm,x,y,z in candidates:
+    r = call("ik", {"arm":arm,"x":x,"y":y,"z":z,"qx":1,"qy":0,"qz":0,"qw":0,"link":"tip"})
+    ok = r.get("ok")
+    coll = None
+    if isinstance(r.get("self_collision"), dict):
+        coll = r["self_collision"].get("valid")
+    print(f"{arm} ({x:.2f},{y:.2f},{z:.2f}) ok={ok} coll_valid={coll} err={r.get('error','')[:80]}")
+PY (Find which arm can reach the cyan tray)
+- Execute: /usr/bin/python3 << 'PY'
+import json, socket
+def call(tool, args, timeout=50):
+    req = {"tool": tool, "arguments": args, "timeout": timeout}
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout+15)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf += c
+    s.close()
+    return json.loads(buf.decode())
+for planner in ("pilz_lin", "ompl"):
+    plan = call("plan_pose", dict(arm="Arm1", x=0.54, y=-0.15, z=0.20,
+                qx=1, qy=0, qz=0, qw=0, link="tip", planner=planner))
+    print(planner, plan.get("ok"), plan.get("plan_id"), plan.get("error"), plan.get("self_collision",{}).get("valid") if plan.get("ok") else "")
+    if plan.get("ok") and plan.get("self_collision",{}).get("valid", True):
+        chk = call("check_plan", {"plan_id": plan["plan_id"]})
+        print(" check", chk.get("valid"), len(chk.get("contacts") or []))
+        if chk.get("valid"):
+            ex = call("execute_plan", {"plan_id": plan["plan_id"]}, timeout=50)
+            print(" EXEC", ex.get("ok"), ex.get("error_code"), ex.get("error"))
+            print(" TIP", call("get_tcp_pose", {"arm":"Arm1","link":"tip"})["pose"]["position"])
+            break
+PY (Move the held block toward the near side of the tray)
+- Execute: /tmp/xtrainer_mcp_call.sh get_camera_frame '{"camera":"camera_left"}' 20
+/usr/bin/python3 << 'PY'
+import cv2, numpy as np, json, socket
+img=cv2.imread("/tmp/xtrainer_view/camera_left_color.jpg")
+hsv=cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+# cyan tray
+tmask=cv2.inRange(hsv,(75,40,40),(105,255,255))
+# ignore the gripper foreground bottom
+tmask[520:,:]=0
+ys,xs=np.where(tmask>0)
+print("cyan pixels", len(xs))
+if len(xs):
+    print("u",xs.min(),xs.max(),"v",ys.min(),ys.max(),"median",int(np.median(xs)),int(np.median(ys)))
+def call(tool, args, timeout=15):
+    req={"tool":tool,"arguments":args,"timeout":timeout}
+    s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(25)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf+=c
+    s.close(); return json.loads(buf.decode())
+# grid in the lower-middle of the image, avoiding fingers (fingers were left/right bottom)
+pts=[(640,200),(640,350),(640,450),(500,350),(780,350),(640,500),(400,250),(860,250)]
+for u,v in pts:
+    r=call("project_pixel",{"camera":"camera_left","u":u,"v":v,"window":5})
+    bgr=img[v,u].tolist(); hsvp=hsv[v,u].tolist()
+    print(f"({u},{v}) hsv={hsvp} base={r.get('base_xyz')} d={r.get('depth_mm')} {r.get('error','')}")
+# save a smaller view of center
+cv2.imwrite("/tmp/xtrainer_view/over_tray.jpg", img[0:560, 280:1000])
+PY (See whether the gripper is over the cyan tray)
+- Execute: /usr/bin/python3 << 'PY'
+import cv2, numpy as np, json, socket
+img=cv2.imread("/tmp/xtrainer_view/camera_left_color.jpg")
+hsv=cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+# cyan, not the blue block (H~102). tray was H~91
+mask=cv2.inRange(hsv,(78,60,40),(98,255,255))
+mask[:80,:]=0
+ys,xs=np.where(mask>0)
+print("n",len(xs))
+# sample a grid of cyan pixels
+pts=[]
+for u in range(100,1200,80):
+    col=np.where(mask[:,u]>0)[0]
+    if len(col)<30: continue
+    for q in (0.2,0.5,0.8):
+        v=int(np.quantile(col,q))
+        pts.append((u,v))
+print("samples",len(pts))
+def call(tool, args, timeout=12):
+    req={"tool":tool,"arguments":args,"timeout":timeout}
+    s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(20)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf+=c
+    s.close(); return json.loads(buf.decode())
+rows=[]
+for u,v in pts:
+    r=call("project_pixel",{"camera":"camera_left","u":int(u),"v":int(v),"window":3})
+    if not r.get("ok"):
+        continue
+    x,y,z=r["base_xyz"]
+    if r["depth_mm"]<180:  # the held block or fingers
+        continue
+    rows.append((x,y,z,r["depth_mm"],u,v))
+rows.sort()
+print("valid",len(rows))
+for row in rows:
+    print(f"x={row[0]:.3f} y={row[1]:.3f} z={row[2]:.3f} d={row[3]:.0f} px=({row[4]},{row[5]})")
+if rows:
+    xs_=[r[0] for r in rows]; ys_=[r[1] for r in rows]; zs=[r[2] for r in rows]
+    print(f"X {min(xs_):.3f}-{max(xs_):.3f} Y {min(ys_):.3f}-{max(ys_):.3f} Z {min(zs):.3f}-{max(zs):.3f}")
+PY (Map the cyan tray outline from the left camera)
+- Execute: /usr/bin/python3 << 'PY'
+import json, socket, time
+def call(tool, args, timeout=40):
+    req = {"tool": tool, "arguments": args, "timeout": timeout}
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout+15)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf += c
+    s.close()
+    return json.loads(buf.decode())
+print("GRIP", call("gripper_get_state",{"side":"left"})["gripper"]["left"]["raw_position"])
+plan = call("plan_pose", dict(arm="Arm1", x=0.54, y=-0.15, z=0.058,
+            qx=1,qy=0,qz=0,qw=0, link="tip", planner="pilz_lin"))
+print("PLAN", plan.get("ok"), plan.get("error"), plan.get("self_collision",{}).get("valid"))
+if plan.get("ok") and plan.get("self_collision",{}).get("valid", True):
+    ex=call("execute_plan", {"plan_id": plan["plan_id"]}, timeout=40)
+    print("EXEC", ex.get("ok"), ex.get("error_code"), ex.get("error"))
+    time.sleep(0.3)
+    print("MODE", call("get_robot_mode",{"arm":"Arm1"})["arms"]["Arm1"])
+    print("TIP", call("get_tcp_pose",{"arm":"Arm1","link":"tip"})["pose"]["position"])
+PY (Lower the block onto the table near the tray)
+- Execute: /usr/bin/python3 << 'PY'
+import json, socket, time
+def call(tool, args, timeout=20):
+    req={"tool":tool,"arguments":args,"timeout":timeout}
+    s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(30)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf+=c
+    s.close(); return json.loads(buf.decode())
+for i in range(6):
+    m=call("get_robot_mode",{"arm":"Arm1"})["arms"]["Arm1"]["mode"]
+    print("mode", m)
+    if m in (5,6,8,10,9,11):
+        break
+    time.sleep(0.3)
+print(call("get_camera_frame",{"camera":"camera_left"})["color_jpeg_path"])
+PY (Confirm the arm settled before releasing)
+- Read: /tmp/xtrainer_view/camera_left_color.jpg
+- Execute: /usr/bin/python3 << 'PY'
+import json, socket, time
+def call(tool, args, timeout=40):
+    req={"tool":tool,"arguments":args,"timeout":timeout}
+    s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(timeout+15)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf+=c
+    s.close(); return json.loads(buf.decode())
+print("OPEN", call("gripper_open", {"side":"left","speed":0.6}))
+time.sleep(1.0)
+print("STATE", call("gripper_get_state",{"side":"left"})["gripper"]["left"])
+plan=call("plan_pose", dict(arm="Arm1", x=0.40, y=-0.08, z=0.28, qx=1,qy=0,qz=0,qw=0, link="tip", planner="pilz_lin"))
+print("PLAN", plan.get("ok"), plan.get("error"), plan.get("self_collision",{}).get("valid") if plan.get("ok") else None)
+if plan.get("ok") and plan.get("self_collision",{}).get("valid", True):
+    ex=call("execute_plan", {"plan_id": plan["plan_id"]}, timeout=40)
+    print("EXEC", ex.get("ok"), ex.get("error_code"), ex.get("error"))
+    print("TIP", call("get_tcp_pose",{"arm":"Arm1","link":"tip"})["pose"]["position"])
+PY (Release the block and pull the left arm back)
+- Execute: /usr/bin/python3 << 'PY'
+import json, socket
+def call(tool, args, timeout=50):
+    req={"tool":tool,"arguments":args,"timeout":timeout}
+    s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(timeout+15)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf+=c
+    s.close(); return json.loads(buf.decode())
+print("TORQUE", call("gripper_set_torque", {"side":"right","limit":450}))
+print("OPEN", call("gripper_open", {"side":"right","speed":0.8}))
+plan=call("plan_pose", dict(arm="Arm2", x=0.54, y=-0.15, z=0.26, qx=1,qy=0,qz=0,qw=0, link="tip", planner="ompl"), timeout=40)
+print("PLAN", plan.get("ok"), plan.get("plan_id"), plan.get("error"), plan.get("self_collision",{}).get("valid") if plan.get("ok") else None, plan.get("duration_sec"))
+if not plan.get("ok"):
+    plan=call("plan_pose", dict(arm="Arm2", x=0.54, y=-0.15, z=0.22, qx=1,qy=0,qz=0,qw=0, link="tip", planner="ompl"), timeout=40)
+    print("PLAN2", plan.get("ok"), plan.get("error"), plan.get("self_collision",{}).get("valid") if plan.get("ok") else None)
+if plan.get("ok") and plan.get("self_collision",{}).get("valid", True):
+    chk=call("check_plan", {"plan_id": plan["plan_id"]})
+    print("CHECK", chk.get("valid"), len(chk.get("contacts") or []))
+    if chk.get("valid"):
+        ex=call("execute_plan", {"plan_id": plan["plan_id"]}, timeout=50)
+        print("EXEC", ex.get("ok"), ex.get("error_code"), ex.get("error"))
+        print("TIP", call("get_tcp_pose",{"arm":"Arm2","link":"tip"})["pose"]["position"])
+PY (Bring the right gripper over the released block)
+
+## User
+
+重新来下吧，这回，你可以考虑旋转末端姿态
+
+## Assistant
+
+这回允许转动末端姿态。我先重新接上 MCP，看清蓝色方块和青色盒子现在的位置，再用手腕相机定位后去抓。
+
+## Tools
+
+- Execute: ps aux | grep -E 'xtrainer_mcp_bridge|bringup.launch|move_group' | grep -v grep | awk '{print $2, $11, $12, $13, $14}' | head -20; ls -l /tmp/xtrainer_mcp_bridge.sock /tmp/xtrainer_mcp_bridge.ready 2>&1 | head -5; echo '--- node fix ---'; grep -n callback_group /opt/Project/dobot_ros2_sdk/xtrainer_mcp/xtrainer_mcp/node.py | head (Check robot stack and MCP bridge status)
+- Execute: /tmp/xtrainer_mcp_call.sh get_status '{}' 25 (Read current arms, grippers, and poses)
+- Execute: /usr/bin/python3 << 'PY'
+import json, socket
+def call(tool, args, timeout=25):
+    req={"tool":tool,"arguments":args,"timeout":timeout}
+    s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(timeout+10)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf+=c
+    s.close(); return json.loads(buf.decode())
+for arm in ("Arm1","Arm2"):
+    r=call("get_tcp_pose", {"arm":arm,"link":"tip"})
+    print(arm, "TIP", json.dumps(r["pose"], ensure_ascii=False))
+for cam in ("camera_left","camera_right"):
+    r=call("get_camera_frame", {"camera":cam})
+    print(cam, r.get("ok"), r.get("color_jpeg_path"), r.get("width"), r.get("height"), r.get("error"))
+PY (Get tip poses and wrist camera frames)
+- Read: /tmp/xtrainer_view/camera_left_color.jpg
+- Read: /tmp/xtrainer_view/camera_right_color.jpg
+- Execute: /usr/bin/python3 << 'PY'
+import cv2, numpy as np, json, socket
+img=cv2.imread("/tmp/xtrainer_view/camera_left_color.jpg")
+hsv=cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+mask=cv2.inRange(hsv,(98,80,40),(125,255,255))
+mask=cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5,5),np.uint8))
+cnts,_=cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+c=max(cnts, key=cv2.contourArea)
+x,y,w,h=cv2.boundingRect(c)
+M=cv2.moments(c)
+cu,cv=int(M["m10"]/M["m00"]), int(M["m01"]/M["m00"])
+print("bbox",x,y,w,h,"center",cu,cv,"area",cv2.contourArea(c))
+cv2.imwrite("/tmp/xtrainer_view/block_now.jpg", img[max(0,y-20):y+h+20, max(0,x-20):x+w+20])
+
+def call(tool, args, timeout=15):
+    req={"tool":tool,"arguments":args,"timeout":timeout}
+    s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(25)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf+=c
+    s.close(); return json.loads(buf.decode())
+
+pts={
+ "c":(cu,cv),
+ "L":(x+4, cu and cv),
+ "R":(x+w-4, cv),
+ "T":(cu, y+4),
+ "B":(cu, y+h-4),
+}
+# fix L
+pts["L"]=(x+4, cv)
+pts["table"]=(cu, min(719, y+h+40))
+for name,(u,v) in pts.items():
+    r=call("project_pixel",{"camera":"camera_left","u":int(u),"v":int(v),"window":5})
+    print(name, (u,v), r.get("base_xyz"), "d", r.get("depth_mm"), r.get("error",""))
+
+# tool axes from current tip quaternion
+import math
+qx,qy,qz,qw=-0.698862,0.714986,0.002756,0.019469
+R=np.array([
+ [1-2*(qy*qy+qz*qz), 2*(qx*qy-qz*qw), 2*(qx*qz+qy*qw)],
+ [2*(qx*qy+qz*qw), 1-2*(qx*qx+qz*qz), 2*(qy*qz-qx*qw)],
+ [2*(qx*qz-qy*qw), 2*(qy*qz+qx*qw), 1-2*(qx*qx+qy*qy)],
+])
+print("toolX", np.round(R[:,0],3))
+print("toolY", np.round(R[:,1],3))
+print("toolZ", np.round(R[:,2],3))
+PY (Locate the blue block and current tool axes)
+- Execute: /usr/bin/python3 << 'PY'
+import json, socket, numpy as np
+def call(tool, args, timeout=45):
+    req={"tool":tool,"arguments":args,"timeout":timeout}
+    s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(timeout+15)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf+=c
+    s.close(); return json.loads(buf.decode())
+
+# point Arm2 straight down over the likely tray
+plan=call("plan_pose", dict(arm="Arm2", x=0.68, y=-0.17, z=0.34,
+            qx=1, qy=0, qz=0, qw=0, link="tip", planner="ompl"))
+print("PLAN", plan.get("ok"), plan.get("plan_id"), plan.get("error"), plan.get("duration_sec"),
+      plan.get("self_collision",{}).get("valid") if plan.get("ok") else None)
+if plan.get("ok") and plan.get("self_collision",{}).get("valid", True):
+    chk=call("check_plan", {"plan_id": plan["plan_id"]})
+    print("CHECK", chk.get("valid"), len(chk.get("contacts") or []))
+    if chk.get("valid"):
+        ex=call("execute_plan", {"plan_id": plan["plan_id"]}, timeout=50)
+        print("EXEC", ex.get("ok"), ex.get("error_code"), ex.get("error"))
+        print("TIP", call("get_tcp_pose",{"arm":"Arm2","link":"tip"})["pose"])
+PY (Move right camera above the cyan tray area)
+- Execute: /tmp/xtrainer_mcp_call.sh get_camera_frame '{"camera":"camera_right"}' 20
+/usr/bin/python3 << 'PY'
+import cv2, numpy as np
+img=cv2.imread("/tmp/xtrainer_view/camera_right_color.jpg")
+hsv=cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+# cyan
+mask=cv2.inRange(hsv,(75,40,40),(100,255,255))
+mask=cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((7,7),np.uint8))
+cnts,_=cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+print("cyan blobs")
+for c in sorted(cnts, key=cv2.contourArea, reverse=True)[:5]:
+    a=cv2.contourArea(c)
+    if a<500: continue
+    x,y,w,h=cv2.boundingRect(c)
+    M=cv2.moments(c)
+    print(f"  area={a:.0f} c=({int(M['m10']/M['m00'])},{int(M['m01']/M['m00'])}) bbox=({x},{y},{w}x{h})")
+# blue
+bmask=cv2.inRange(hsv,(100,80,40),(125,255,255))
+cnts,_=cv2.findContours(bmask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+print("blue blobs")
+for c in sorted(cnts, key=cv2.contourArea, reverse=True)[:4]:
+    a=cv2.contourArea(c)
+    if a<400: continue
+    x,y,w,h=cv2.boundingRect(c)
+    M=cv2.moments(c)
+    print(f"  area={a:.0f} c=({int(M['m10']/M['m00'])},{int(M['m01']/M['m00'])}) bbox=({x},{y},{w}x{h})")
+cv2.imwrite("/tmp/xtrainer_view/right_view.jpg", img)
+print(img.shape)
+PY (Find the cyan tray in the right camera)
+- Read: /tmp/xtrainer_view/camera_right_color.jpg
+- Execute: /usr/bin/python3 << 'PY'
+import cv2, numpy as np, json, socket
+img=cv2.imread("/tmp/xtrainer_view/camera_right_color.jpg")
+hsv=cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+mask=cv2.inRange(hsv,(78,50,40),(100,255,255))
+# focus on the main blob region
+mask[:, 900:]=0
+mask[400:,:]=0
+ys,xs=np.where(mask>0)
+print("tray mask", len(xs), "u", xs.min(), xs.max(), "v", ys.min(), ys.max())
+def call(tool, args, timeout=12):
+    req={"tool":tool,"arguments":args,"timeout":timeout}
+    s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(20)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf+=c
+    s.close(); return json.loads(buf.decode())
+rows=[]
+for u in range(int(xs.min())+10, int(xs.max())-5, 50):
+    col=np.where(mask[:,u]>0)[0]
+    if len(col)<10: continue
+    for q in (0.15, 0.5, 0.85):
+        v=int(np.quantile(col, q))
+        r=call("project_pixel",{"camera":"camera_right","u":int(u),"v":int(v),"window":5})
+        if not r.get("ok"):
+            print("fail", u,v, r.get("error")); continue
+        x,y,z=r["base_xyz"]
+        if r["depth_mm"]<80: continue
+        rows.append((x,y,z,r["depth_mm"],u,v))
+        print(f"x={x:.3f} y={y:.3f} z={z:.3f} d={r['depth_mm']:.0f} px=({u},{v})")
+if rows:
+    print("X", min(r[0] for r in rows), max(r[0] for r in rows))
+    print("Y", min(r[1] for r in rows), max(r[1] for r in rows))
+    print("Z", min(r[2] for r in rows), max(r[2] for r in rows))
+    # lowest points are the floor
+    floor=[r for r in rows if r[2]<np.median([t[2] for t in rows])+0.01]
+    print("floor n", len(floor), "zmed", float(np.median([r[2] for r in floor])))
+PY (Measure cyan tray floor in base_link)
+- Execute: /usr/bin/python3 << 'PY'
+import json, socket, numpy as np
+def call(tool, args, timeout=50):
+    req={"tool":tool,"arguments":args,"timeout":timeout}
+    s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(timeout+20)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf+=c
+    s.close(); return json.loads(buf.decode())
+
+def quat_of(alpha_deg):
+    a=np.deg2rad(alpha_deg)
+    c,s=np.cos(a),np.sin(a)
+    # columns: toolX, toolY, toolZ
+    R=np.array([
+        [c, 0, s],
+        [0,-1, 0],
+        [s, 0,-c],
+    ], dtype=float)
+    t=np.trace(R)
+    if t>0:
+        S=np.sqrt(t+1.0)*2
+        w=0.25*S; x=(R[2,1]-R[1,2])/S; y=(R[0,2]-R[2,0])/S; z=(R[1,0]-R[0,1])/S
+    elif R[0,0]>R[1,1] and R[0,0]>R[2,2]:
+        S=np.sqrt(1+R[0,0]-R[1,1]-R[2,2])*2
+        w=(R[2,1]-R[1,2])/S; x=0.25*S; y=(R[0,1]+R[1,0])/S; z=(R[0,2]+R[2,0])/S
+    elif R[1,1]>R[2,2]:
+        S=np.sqrt(1+R[1,1]-R[0,0]-R[2,2])*2
+        w=(R[0,2]-R[2,0])/S; x=(R[0,1]+R[1,0])/S; y=0.25*S; z=(R[1,2]+R[2,1])/S
+    else:
+        S=np.sqrt(1+R[2,2]-R[0,0]-R[1,1])*2
+        w=(R[1,0]-R[0,1])/S; x=(R[0,2]+R[2,0])/S; y=(R[1,2]+R[2,1])/S; z=0.25*S
+    q=np.array([x,y,z,w]); q/=np.linalg.norm(q)
+    if q[3]<0: q=-q
+    return q
+
+# clear Arm2
+plan=call("plan_pose", dict(arm="Arm2", x=0.95, y=0.08, z=0.40, qx=1,qy=0,qz=0,qw=0, link="tip", planner="ompl"))
+print("ARM2", plan.get("ok"), plan.get("error"), plan.get("self_collision",{}).get("valid") if plan.get("ok") else None)
+if plan.get("ok") and plan.get("self_collision",{}).get("valid", True):
+    chk=call("check_plan", {"plan_id": plan["plan_id"]})
+    print(" check", chk.get("valid"))
+    if chk.get("valid"):
+        ex=call("execute_plan", {"plan_id": plan["plan_id"]}, timeout=50)
+        print(" exec", ex.get("ok"), ex.get("error_code"))
+
+print("--- IK place tilts ---")
+for ang in (0, 20, 25, 30, 35, 40):
+    q=quat_of(ang)
+    for z in (0.14, 0.11):
+        r=call("ik", {"arm":"Arm1","x":0.60,"y":-0.18,"z":z,
+                      "qx":float(q[0]),"qy":float(q[1]),"qz":float(q[2]),"qw":float(q[3]),
+                      "link":"tip"})
+        print(f"  a={ang:2d} z={z:.2f} ok={r.get('ok')} valid={r.get('self_collision',{}).get('valid') if r.get('ok') else None} q={np.round(q,3).tolist()} {r.get('error','')[:60]}")
+PY (Clear right arm and test tilted reach into the tray)
+
+## Assistant
+
+青色盒子在右臂这边，竖直向下够不到。我改成先竖直抓起方块，放进去时把末端向盒子倾斜。
+
+## Tools
+
+- Execute: /usr/bin/python3 << 'PY'
+import json, socket
+def call(tool, args, timeout=50):
+    req={"tool":tool,"arguments":args,"timeout":timeout}
+    s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(timeout+20)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf+=c
+    s.close(); return json.loads(buf.decode())
+print("TQ", call("gripper_set_torque", {"side":"left","limit":450}))
+print("OPEN", call("gripper_open", {"side":"left","speed":0.8}))
+plan=call("plan_pose", dict(arm="Arm1", x=0.356, y=-0.092, z=0.17,
+            qx=1, qy=0, qz=0, qw=0, link="tip", planner="ompl"))
+print("PLAN", plan.get("ok"), plan.get("plan_id"), plan.get("error"),
+      plan.get("duration_sec"), plan.get("self_collision",{}).get("valid") if plan.get("ok") else None)
+if plan.get("ok") and plan.get("self_collision",{}).get("valid", True):
+    chk=call("check_plan", {"plan_id": plan["plan_id"]})
+    print("CHECK", chk.get("valid"), len(chk.get("contacts") or []))
+    if chk.get("valid"):
+        ex=call("execute_plan", {"plan_id": plan["plan_id"]}, timeout=50)
+        print("EXEC", ex.get("ok"), ex.get("error_code"), ex.get("error"))
+        print("TIP", call("get_tcp_pose",{"arm":"Arm1","link":"tip"})["pose"]["position"])
+PY (Move left gripper above the block, jaws across its width)
+- Execute: /tmp/xtrainer_mcp_call.sh get_camera_frame '{"camera":"camera_left"}' 15
+/usr/bin/python3 << 'PY'
+import cv2, numpy as np, json, socket
+img=cv2.imread("/tmp/xtrainer_view/camera_left_color.jpg")
+hsv=cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+mask=cv2.inRange(hsv,(98,90,40),(125,255,255))
+mask=cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5,5),np.uint8))
+# ignore very bottom fingers maybe still blue? no
+cnts,_=cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+c=max(cnts, key=cv2.contourArea)
+x,y,w,h=cv2.boundingRect(c)
+M=cv2.moments(c)
+cu,cv=int(M["m10"]/M["m00"]), int(M["m01"]/M["m00"])
+print("bbox",x,y,w,h,"c",cu,cv,"area",cv2.contourArea(c))
+cv2.imwrite("/tmp/xtrainer_view/pregrasp.jpg", img[max(0,y-30):y+h+80, max(0,x-80):x+w+80])
+def call(tool, args, timeout=12):
+    req={"tool":tool,"arguments":args,"timeout":timeout}
+    s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(20)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf+=c
+    s.close(); return json.loads(buf.decode())
+for name,u,v in (("c",cu,cv),("L",x+3,cv),("R",x+w-3,cv),("T",cu,y+3),("B",cu,y+h-3)):
+    r=call("project_pixel",{"camera":"camera_left","u":int(u),"v":int(v),"window":5})
+    print(name,(u,v), r.get("base_xyz"), r.get("depth_mm"))
+PY (Check block alignment under the open gripper)
+
+## User
+
+刚刚卡住了，环境未发生变化
+
+## Assistant
+
+环境还是刚才那样。左夹爪已经停在蓝色方块正上方，我接着往下抓，放进青色盒子时把末端倾斜过去。
+
+## Tools
+
+- Execute: ls -l /tmp/xtrainer_mcp_bridge.sock /tmp/xtrainer_view/pregrasp.jpg 2>&1 | head -5
+/tmp/xtrainer_mcp_call.sh get_tcp_pose '{"arm":"Arm1","link":"tip"}' 20
+echo '---'
+/tmp/xtrainer_mcp_call.sh get_tcp_pose '{"arm":"Arm2","link":"tip"}' 20
+echo '---'
+/tmp/xtrainer_mcp_call.sh gripper_get_state '{"side":"both"}' 15
+echo '---'
+/tmp/xtrainer_mcp_call.sh get_robot_mode '{"arm":"both"}' 15 (Confirm both arms are still at the pregrasp pose)
+- Read: /tmp/xtrainer_view/pregrasp.jpg
+- Execute: /usr/bin/python3 << 'PY'
+import json, socket, time
+def call(tool, args, timeout=45):
+    req={"tool":tool,"arguments":args,"timeout":timeout}
+    s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(timeout+20)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf+=c
+    s.close(); return json.loads(buf.decode())
+
+def go(arm, x, y, z, q, planner="pilz_lin"):
+    plan=call("plan_pose", dict(arm=arm, x=x, y=y, z=z, qx=q[0], qy=q[1], qz=q[2], qw=q[3], link="tip", planner=planner))
+    print("PLAN", planner, plan.get("ok"), plan.get("plan_id"), plan.get("error"),
+          plan.get("self_collision",{}).get("valid") if plan.get("ok") else None, plan.get("duration_sec"))
+    if not (plan.get("ok") and plan.get("self_collision",{}).get("valid", True)):
+        return False
+    chk=call("check_plan", {"plan_id": plan["plan_id"]})
+    print(" CHECK", chk.get("valid"), len(chk.get("contacts") or []))
+    if not chk.get("valid"):
+        return False
+    ex=call("execute_plan", {"plan_id": plan["plan_id"]}, timeout=50)
+    print(" EXEC", ex.get("ok"), ex.get("error_code"), ex.get("error"))
+    return ex.get("ok")
+
+q_down=(1,0,0,0)
+ok=go("Arm1", 0.356, -0.092, 0.050, q_down, "pilz_lin")
+print("TIP", call("get_tcp_pose",{"arm":"Arm1","link":"tip"})["pose"]["position"])
+for i in range(6):
+    m=call("get_robot_mode",{"arm":"Arm1"})["arms"]["Arm1"]["mode"]
+    if m==5: break
+    time.sleep(0.3)
+print("MODE", m)
+PY (Lower the open left gripper onto the blue block)
+- Execute: /tmp/xtrainer_mcp_call.sh get_camera_frame '{"camera":"camera_left"}' 15 >/dev/null
+echo saved (Capture gripper view at grasp height)
+- Read: /tmp/xtrainer_view/camera_left_color.jpg
+- Execute: /usr/bin/python3 << 'PY'
+import json, socket, time
+def call(tool, args, timeout=40):
+    req={"tool":tool,"arguments":args,"timeout":timeout}
+    s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(timeout+15)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf+=c
+    s.close(); return json.loads(buf.decode())
+
+def go(x,y,z,q,planner="pilz_lin"):
+    plan=call("plan_pose", dict(arm="Arm1", x=x,y=y,z=z, qx=q[0],qy=q[1],qz=q[2],qw=q[3], link="tip", planner=planner))
+    print("PLAN", planner, (x,y,z), plan.get("ok"), plan.get("error"), plan.get("self_collision",{}).get("valid") if plan.get("ok") else None)
+    if not (plan.get("ok") and plan.get("self_collision",{}).get("valid", True)):
+        return False
+    chk=call("check_plan", {"plan_id": plan["plan_id"]})
+    if not chk.get("valid"):
+        print(" COLLIDE", chk.get("contacts"))
+        return False
+    ex=call("execute_plan", {"plan_id": plan["plan_id"]}, timeout=50)
+    print(" EXEC", ex.get("ok"), ex.get("error_code"), ex.get("error"))
+    return bool(ex.get("ok"))
+
+print("CLOSE", call("gripper_close", {"side":"left","speed":0.5}))
+time.sleep(1.4)
+st=call("gripper_get_state",{"side":"left"})["gripper"]["left"]
+print("STATE", st)
+if st["position"]<0.15:
+    print("GRASP LOOKS OPEN, abort lift")
+    raise SystemExit(1)
+q=(1,0,0,0)
+ok=go(0.356,-0.092,0.20,q,"pilz_lin")
+print("TIP", call("get_tcp_pose",{"arm":"Arm1","link":"tip"})["pose"]["position"])
+print("GRIP", call("gripper_get_state",{"side":"left"})["gripper"]["left"])
+PY (Close on the block and lift it)
+- Execute: /tmp/xtrainer_mcp_call.sh get_camera_frame '{"camera":"camera_left"}' 15 >/dev/null; echo ok (Check that the block is still in the gripper)
+- Read: /tmp/xtrainer_view/camera_left_color.jpg
+- Execute: /usr/bin/python3 << 'PY'
+import json, socket, time
+def call(tool, args, timeout=50):
+    req={"tool":tool,"arguments":args,"timeout":timeout}
+    s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(timeout+20)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf+=c
+    s.close(); return json.loads(buf.decode())
+
+def go(x,y,z,q,planner):
+    plan=call("plan_pose", dict(arm="Arm1", x=x,y=y,z=z, qx=q[0],qy=q[1],qz=q[2],qw=q[3], link="tip", planner=planner))
+    ok=plan.get("ok") and plan.get("self_collision",{}).get("valid", True)
+    print(f"PLAN {planner} ({x:.2f},{y:.2f},{z:.2f}) ok={plan.get('ok')} err={plan.get('error')} coll={plan.get('self_collision',{}).get('valid') if plan.get('ok') else None}")
+    if not ok:
+        return False
+    chk=call("check_plan", {"plan_id": plan["plan_id"]})
+    print(" CHECK", chk.get("valid"), "contacts", len(chk.get("contacts") or []))
+    if not chk.get("valid"):
+        return False
+    ex=call("execute_plan", {"plan_id": plan["plan_id"]}, timeout=60)
+    print(" EXEC", ex.get("ok"), ex.get("error_code"), ex.get("error"))
+    tip=call("get_tcp_pose",{"arm":"Arm1","link":"tip"})["pose"]
+    print(" TIP", tip["position"], "q", tip["orientation"])
+    g=call("gripper_get_state",{"side":"left"})["gripper"]["left"]
+    print(" GRIP", g["position"], g["status"])
+    return bool(ex.get("ok")) and g["position"]>0.2
+
+q_down=(1,0,0,0)
+q_tilt=(0.976, 0.0, 0.216, 0.0)
+if not go(0.48, -0.18, 0.22, q_down, "pilz_lin"):
+    print("lin failed, try ompl")
+    if not go(0.48, -0.18, 0.22, q_down, "ompl"):
+        raise SystemExit(2)
+if not go(0.60, -0.18, 0.11, q_tilt, "pilz_lin"):
+    print("tilt lin failed, try ompl")
+    if not go(0.60, -0.18, 0.11, q_tilt, "ompl"):
+        raise SystemExit(3)
+print("READY TO RELEASE")
+PY (Carry the block over the tray and tilt the wrist in)
+- Execute: /tmp/xtrainer_mcp_call.sh get_camera_frame '{"camera":"camera_left"}' 15 >/dev/null; echo ok (Look down into the tray before releasing)
+- Read: /tmp/xtrainer_view/camera_left_color.jpg
+- Execute: /usr/bin/python3 << 'PY'
+import json, socket, time
+def call(tool, args, timeout=40):
+    req={"tool":tool,"arguments":args,"timeout":timeout}
+    s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(timeout+15)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf+=c
+    s.close(); return json.loads(buf.decode())
+
+q=(0.976, 0.0, 0.216, 0.0)
+plan=call("plan_pose", dict(arm="Arm1", x=0.60, y=-0.18, z=0.095, qx=q[0],qy=q[1],qz=q[2],qw=q[3], link="tip", planner="pilz_lin"))
+print("LOWER", plan.get("ok"), plan.get("error"), plan.get("self_collision",{}).get("valid") if plan.get("ok") else None)
+if plan.get("ok") and plan.get("self_collision",{}).get("valid", True):
+    chk=call("check_plan", {"plan_id": plan["plan_id"]})
+    if chk.get("valid"):
+        ex=call("execute_plan", {"plan_id": plan["plan_id"]}, timeout=30)
+        print(" EXEC", ex.get("ok"), ex.get("error_code"))
+        print(" TIP", call("get_tcp_pose",{"arm":"Arm1","link":"tip"})["pose"]["position"])
+print("OPEN", call("gripper_open", {"side":"left","speed":0.7}))
+time.sleep(0.8)
+print("STATE", call("gripper_get_state",{"side":"left"})["gripper"]["left"]["status"])
+# retreat up and back, keep tilt first so we don't sweep the block
+plan=call("plan_pose", dict(arm="Arm1", x=0.48, y=-0.16, z=0.24, qx=1,qy=0,qz=0,qw=0, link="tip", planner="ompl"))
+print("RETREAT", plan.get("ok"), plan.get("error"))
+if plan.get("ok") and plan.get("self_collision",{}).get("valid", True):
+    chk=call("check_plan", {"plan_id": plan["plan_id"]})
+    print(" CHECK", chk.get("valid"))
+    if chk.get("valid"):
+        ex=call("execute_plan", {"plan_id": plan["plan_id"]}, timeout=50)
+        print(" EXEC", ex.get("ok"), ex.get("error_code"), ex.get("error"))
+        print(" TIP", call("get_tcp_pose",{"arm":"Arm1","link":"tip"})["pose"]["position"])
+PY (Release the block into the tray and pull the arm back)
+- Execute: /tmp/xtrainer_mcp_call.sh get_camera_frame '{"camera":"camera_left"}' 15 >/dev/null
+/usr/bin/python3 << 'PY'
+import cv2, numpy as np
+img=cv2.imread("/tmp/xtrainer_view/camera_left_color.jpg")
+hsv=cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+blue=cv2.inRange(hsv,(98,80,40),(125,255,255))
+cyan=cv2.inRange(hsv,(75,40,40),(100,255,255))
+print("blue px", int(blue.sum()/255), "cyan px", int(cyan.sum()/255))
+cnts,_=cv2.findContours(blue, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+for c in sorted(cnts, key=cv2.contourArea, reverse=True)[:3]:
+    a=cv2.contourArea(c)
+    if a<300: continue
+    x,y,w,h=cv2.boundingRect(c)
+    print(f"blue area={a:.0f} bbox=({x},{y},{w}x{h})")
+cv2.imwrite("/tmp/xtrainer_view/after_place.jpg", img)
+PY (Check left camera after the release)
+- Read: /tmp/xtrainer_view/after_place.jpg
+- Execute: /usr/bin/python3 << 'PY'
+import json, socket
+def call(tool, args, timeout=15):
+    req={"tool":tool,"arguments":args,"timeout":timeout}
+    s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(25)
+    s.connect("/tmp/xtrainer_mcp_bridge.sock")
+    s.sendall((json.dumps(req)+"\n").encode())
+    buf=b""
+    while b"\n" not in buf:
+        c=s.recv(1<<20)
+        if not c: break
+        buf+=c
+    s.close(); return json.loads(buf.decode())
+for u,v in ((900,80),(980,160),(850,200),(1000,120),(900,250)):
+    r=call("project_pixel",{"camera":"camera_left","u":u,"v":v,"window":5})
+    print(f"({u},{v})", r.get("base_xyz"), "d", r.get("depth_mm"), r.get("error",""))
+print("MODE", call("get_robot_mode",{"arm":"both"})["arms"])
+PY (Confirm the block's position is inside the tray)
+
+## Assistant
+
+蓝色方块已经放进青色盒子里。左臂已经退开，两条臂都停在空闲状态。
+
+竖直向下够不到盒子，所以抓取时夹爪仍然朝下，夹住方块的窄边；送到盒子上方后，末端绕侧向转了大约 25°，指尖才落到盒底上方。松开后，方块落在盒内，手腕相机测到它在盒子范围内，高度也和盒底加上方块厚度一致。定位只用了左右手腕相机，没有用头顶相机的标定。

@@ -103,11 +103,12 @@ class XTrainerMcpNode(Node):
         self._gate = MotionGate()
         self._joint_lock = threading.Lock()
         self._joints: dict[str, float] = {}
-        self._clients = ReentrantCallbackGroup()
+        # rclpy.Node already uses _clients for its service-client list.
+        self._callback_group = ReentrantCallbackGroup()
         self.create_subscription(JointState, "/joint_states", self._on_joints, 10)
         self.cameras = CameraHub(self)
-        self.motion = MotionClient(self, urdf, srdf, self._clients)
-        self.servo = ServoStreamer(self, self._clients)
+        self.motion = MotionClient(self, urdf, srdf, self._callback_group)
+        self.servo = ServoStreamer(self, self._callback_group)
         self.robot = RobotController(self)
         self.gripper = GripperController(self)
         self.get_logger().info("xtrainer_mcp 已连接 ROS 图，等待 agent 调用")
