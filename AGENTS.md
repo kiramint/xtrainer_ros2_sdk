@@ -26,6 +26,7 @@ XTrainer 是一个双臂机器人系统，使用 ROS2 Jazzy + Ubuntu24.04 进行
 | `xtrainer_description` | URDF 模型 (x_trainer.urdf) |
 | `xtrainer_gripper` | 串口夹爪控制节点 |
 | `xtrainer_task` | MoveItPy 任务层控制 (Python API, 规划+执行+可视化) |
+| `xtrainer_mcp` | Agent MCP。客户端方式调用相机、move_group、夹爪和抱闸 |
 | `easy_handeye2` | 手眼标定工具包 |
 
 ---
@@ -255,6 +256,16 @@ URDF effort/velocity 全部设为 `0` (=不限制), 清理 SolidWorks 导出垃�
 > **注意**: 旧的 `xtrainer_bridge_node` 仍保留但不再使用, 被 `xtrainer_joint_states` + `xtrainer_controller` 替代。
 
 ### MoveIt 启动方式
+
+给 agent 用时一条命令拉起驱动和 move_group（不要再叠加 `demo.launch.py`，那个文件会再起一个 robot_state_publisher）:
+
+```bash
+ros2 launch xtrainer_mcp bringup.launch.py
+# use_rviz:=false 可关 RViz
+# MCP 进程另开: ros2 run xtrainer_mcp xtrainer_mcp
+```
+
+手动开 RViz 时仍然可以分两步，不要和 bringup 一起开:
 
 ```bash
 # 1. 先启动驱动+桥接 (提供 action server + joint_states)
@@ -961,3 +972,16 @@ if robot_mode == 9:  # Error
 - [x] `enable_arms.py` 先挂上 executor 再调用服务, 不再在构造函数里 `sys.exit`
 - [x] 服务发现: 节点已有 executor 时只轮询 future; 没有 executor 时用 `spin_once` 推进发现
 - [x] `disable_arm` 在拖拽模式先 `StopDrag`
+
+---
+
+## 本次会话修改记录 (xtrainer_mcp, 2026-11-20)
+
+新建 `xtrainer_mcp`。MCP 是已经在跑的 ROS 图的客户端，不内嵌 MoveItPy。
+
+- `ros2 launch xtrainer_mcp bringup.launch.py` 拉起 `start.launch.py` + `move_group` + 可选 RViz
+- 不要把 `demo.launch.py` 和 bringup 一起开（第二个 robot_state_publisher）
+- MCP 用 `ros2 run xtrainer_mcp xtrainer_mcp` 另开，stdio 独占 stdout
+- SDK 是 `mcp` 2.x 的 `MCPServer`，装在 `xtrainer_mcp/.vendor`（不进系统 Python）
+- 规划 `/plan_kinematic_path`，执行 `/execute_trajectory`，FK/IK/自碰撞走 move_group
+- 细节见 `xtrainer_mcp/README.md`

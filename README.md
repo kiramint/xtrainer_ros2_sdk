@@ -316,7 +316,9 @@ ros2 launch xtrainer_control disable.launch.py
 ### MoveIt2
 
 ```shell
-# 启动 Move Group 与 Rviz2
+# 一条命令拉起驱动、相机、夹爪和 MoveIt（agent / MCP 用这个）
+ros2 launch xtrainer_mcp bringup.launch.py
+# 启动 Move Group 与 Rviz2（不要和上面的 bringup 同时开）
 ros2 launch xtrainer_moveit demo.launch.py
 # 仅启动 Move Group（用于程序调用）
 ros2 launch xtrainer_moveit move_group.launch.py
